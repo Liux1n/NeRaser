@@ -384,7 +384,9 @@ class NerfactoModel(Model):
         self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
     ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
         gt_rgb = batch["image"].to(self.device)
+        print(gt_rgb.shape)
         predicted_rgb = outputs["rgb"]  # Blended with background (black if random background)
+        print(predicted_rgb.shape)
         gt_rgb = self.renderer_rgb.blend_background(gt_rgb)
         acc = colormaps.apply_colormap(outputs["accumulation"])
         depth = colormaps.apply_depth_colormap(
