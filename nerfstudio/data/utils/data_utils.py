@@ -19,21 +19,50 @@ from typing import List, Tuple, Union
 import cv2
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 
+# optional mapping of values with morphological shapes
+def morph_shape(val):
+    if val == 0:
+        return cv2.MORPH_RECT
+    elif val == 1:
+        return cv2.MORPH_CROSS
+    elif val == 2:
+        return cv2.MORPH_ELLIPSE
+    
 
 def get_image_mask_tensor_from_path(filepath: Path, scale_factor: float = 1.0) -> torch.Tensor:
     """
     Utility function to read a mask image from the given path and return a boolean tensor
     """
-    pil_mask = Image.open(filepath)
+    pil_mask = Image.open(filepath) # input masks: background is white, and mask is black
+    # goal: dilate black mask
+
+    #invert black and white
+    #pil_mask = ImageOps.invert(pil_mask)
+
     # Convert the image to grayscale
     pil_mask = pil_mask.convert("L")
+
     if scale_factor != 1.0:
         width, height = pil_mask.size
         newsize = (int(width * scale_factor), int(height * scale_factor))
         pil_mask = pil_mask.resize(newsize, resample=Image.NEAREST)
-    mask_tensor = torch.from_numpy(np.array(pil_mask)).unsqueeze(-1).bool()
+
+    # mask dilation
+    # size and shape hardcoded for now
+    # TODO: Parameterization
+    dilatation_size = 10
+    dilation_shape = morph_shape(2)
+    element = cv2.getStructuringElement(dilation_shape, (2 * dilatation_size + 1, 2 * dilatation_size + 1),
+                                                (dilatation_size, dilatation_size))
+
+    src = np.array(pil_mask)
+    dilatation_dst = cv2.erode(src, element) # erode white = dilate black
+      
+    mask_tensor = torch.from_numpy(dilatation_dst).unsqueeze(-1).bool()
+    
+    #mask_tensor = torch.from_numpy(np.array(pil_mask)).unsqueeze(-1).bool()
     if len(mask_tensor.shape) != 3:
         raise ValueError("The mask image should have 1 channel")
     return mask_tensor
