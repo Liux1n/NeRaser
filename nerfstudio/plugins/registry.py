@@ -40,6 +40,8 @@ def discover_methods() -> t.Tuple[t.Dict[str, TrainerConfig], t.Dict[str, str]]:
     descriptions = {}
     discovered_entry_points = entry_points(group="nerfstudio.method_configs")
     for name in discovered_entry_points.names:
+        if name == 'method-template':  # Add this condition to skip the 'method-template' plugin
+            continue    
         spec = discovered_entry_points[name].load()
         if not isinstance(spec, MethodSpecification):
             CONSOLE.print(
