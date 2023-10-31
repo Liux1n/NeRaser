@@ -427,6 +427,12 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
                         break
         super().__init__()
 
+        # TODO: initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) inside the scene_box (can be extracted from dataparser_outputs)
+        # where each vertex stores a boolean indicating objectness (whether it is inside the masked object)
+        # add a new method "object_mask_from_2d_masks", where vertices are projected (using projection matrix derived from dataparser_outputs.cameras) 
+        # to all 2D image planes to identify those falling into all 2D masks
+        # can consider tricks such as coarse-to-fine or sorting the 2D mask areas
+
     @cached_property
     def dataset_type(self) -> Type[TDataset]:
         """Returns the dataset type passed as the generic argument"""
@@ -548,6 +554,10 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         ray_bundle = self.eval_ray_generator(ray_indices)
         return ray_bundle, batch
 
+    # TODO: query self.object_grid and modify the "ray_bundle.near" attribute to avoid the object
+    # add a new method "mask_ray_bundle" that samples from ray bundles and query self.object_grid and output a "masked" ray bundle with its "near" modified
+    # Then the object should be skipped at least while rendering eval images
+    # If successful, do the same thing for renderer and viewer (not sure if they use this method but quite sure they also use a datamanager)
     def next_eval_image(self, step: int) -> Tuple[int, RayBundle, Dict]:
         for camera_ray_bundle, batch in self.eval_dataloader:
             assert camera_ray_bundle.camera_indices is not None
