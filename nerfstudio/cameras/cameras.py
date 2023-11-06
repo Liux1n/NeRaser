@@ -314,6 +314,9 @@ class Cameras(TensorDataclass):
             image_coords = torch.stack(image_coords, dim=-1) + pixel_offset  # stored as (y, x) coordinates
         return image_coords
 
+    # TODO: Modify this method to take another argument "object_aabb: Float[Tensor, "2 3"]" and use "intersect_aabb" to get "t_max"
+    # but instead assigning it to "nears"
+    # Maybe need to still set "fars" according to the normal aabb
     def generate_rays(
         self,
         camera_indices: Union[Int[Tensor, "*num_rays num_cameras_batch_dims"], int],
@@ -324,6 +327,8 @@ class Cameras(TensorDataclass):
         disable_distortion: bool = False,
         aabb_box: Optional[SceneBox] = None,
         obb_box: Optional[OrientedBox] = None,
+        # new
+        object_aabb: Optional[Float[Tensor, "2 3"]] = None,
     ) -> RayBundle:
         """Generates rays for the given camera indices.
 
@@ -492,6 +497,32 @@ class Cameras(TensorDataclass):
 
                 raybundle.nears = t_min
                 raybundle.fars = t_max
+
+        # Keep fars as it is, change nears
+        # hardcoded for lego
+        object_aabb = torch.tensor([[-1.58240465, -2.3752433 , -3.95161623],
+                                    [ 0.92683118,  0.15093034, -0.33374367]])
+        if object_aabb is not None:
+            with torch.no_grad():
+                rays_o = raybundle.origins.contiguous()
+                rays_d = raybundle.directions.contiguous()
+
+                shape = rays_o.shape
+
+                rays_o = rays_o.reshape((-1, 3))
+                rays_d = rays_d.reshape((-1, 3))
+
+                object_tensor_aabb = Parameter(object_aabb.flatten(), requires_grad=False)
+                object_tensor_aabb = object_tensor_aabb.to(rays_o.device)
+                t_min, t_max = nerfstudio.utils.math.intersect_objectbox(rays_o, rays_d, object_tensor_aabb)
+
+                t_max = t_max.reshape([-1, 1])
+
+                raybundle.nears = t_max
+                raybundle.fars = 1000 * torch.ones_like(raybundle.nears)
+
+        print(f"NEARS[0,0]: {raybundle.nears[0,0]}, \n")
+        print(f"FARS[0,0]: {raybundle.fars[0,0]}\n")
 
         # TODO: We should have to squeeze the last dimension here if we started with zero batch dims, but never have to,
         # so there might be a rogue squeeze happening somewhere, and this may cause some unintended behaviour

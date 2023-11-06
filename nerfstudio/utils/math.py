@@ -240,6 +240,30 @@ def intersect_aabb(
 
     return t_min, t_max
 
+def intersect_objectbox(
+    origins: torch.Tensor,
+    directions: torch.Tensor,
+    aabb: torch.Tensor,
+    max_bound: float = 1e10,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+
+    tx_min = (aabb[:3] - origins) / directions
+    tx_max = (aabb[3:] - origins) / directions
+
+    t_min = torch.stack((tx_min, tx_max)).amin(dim=0)
+    t_max = torch.stack((tx_min, tx_max)).amax(dim=0)
+
+    t_min = t_min.amax(dim=-1)
+    t_max = t_max.amin(dim=-1)
+
+    t_min = torch.clamp(t_min, min=0, max=max_bound)
+    t_max = torch.clamp(t_max, min=0, max=max_bound)
+
+    cond = t_max <= t_min
+    t_min = torch.where(cond, 0, t_min)
+    t_max = torch.where(cond, 0, t_max)
+
+    return t_min, t_max
 
 def intersect_obb(
     origins: torch.Tensor,
