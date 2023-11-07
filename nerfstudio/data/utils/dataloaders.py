@@ -27,6 +27,9 @@ import torch
 from rich.progress import track
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
+# added for object_aabb
+from jaxtyping import Float
+from torch import Tensor
 
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.cameras.rays import RayBundle
@@ -158,12 +161,17 @@ class EvalDataloader(DataLoader):
         self,
         input_dataset: InputDataset,
         device: Union[torch.device, str] = "cpu",
+        object_aabb: Optional[Float[Tensor, "2 3"]] = None, # new
         **kwargs,
     ):
         self.input_dataset = input_dataset
         self.cameras = input_dataset.cameras.to(device)
         self.device = device
         self.kwargs = kwargs
+
+        # new
+        self.object_aabb = object_aabb
+
         super().__init__(dataset=input_dataset)
 
     @abstractmethod
@@ -189,7 +197,7 @@ class EvalDataloader(DataLoader):
         Args:
             image_idx: Camera image index
         """
-        ray_bundle = self.cameras.generate_rays(camera_indices=image_idx, keep_shape=True)
+        ray_bundle = self.cameras.generate_rays(camera_indices=image_idx, keep_shape=True, object_aabb=self.object_aabb) # added object_aabb
         batch = self.input_dataset[image_idx]
         batch = get_dict_to_torch(batch, device=self.device, exclude=["image"])
         assert isinstance(batch, dict)

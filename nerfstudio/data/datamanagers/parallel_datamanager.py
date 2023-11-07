@@ -186,6 +186,102 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.train_dataset = self.create_train_dataset()
         self.eval_dataset = self.create_eval_dataset()
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
+
+        # TODO: as an argument / derive it here
+        # hardcoded object_aabb for lego
+        # self.object_aabb = torch.tensor([[-1.58240465, -2.3752433 , -3.95161623],
+        #                                  [ 0.92683118,  0.15093034, -0.33374367]])
+        self.object_aabb = torch.tensor([[-1.58240465, -0.15093034, 0.33374367],
+                                         [ 0.92683118, 2.3752433, 3.95161623]])
+        
+        # transform using dataparser_transform and dataparser_scale
+        transform_matrix = self.train_dataparser_outputs.dataparser_transform
+        scale_factor = self.train_dataparser_outputs.dataparser_scale
+
+        # Extract min and max points
+        min_point = self.object_aabb[0]
+        max_point = self.object_aabb[1]
+
+        # Compute all 8 vertices of the AABB
+        bbox_vertices = torch.tensor([
+            [min_point[0], min_point[1], min_point[2]],
+            [min_point[0], min_point[1], max_point[2]],
+            [min_point[0], max_point[1], min_point[2]],
+            [min_point[0], max_point[1], max_point[2]],
+            [max_point[0], min_point[1], min_point[2]],
+            [max_point[0], min_point[1], max_point[2]],
+            [max_point[0], max_point[1], min_point[2]],
+            [max_point[0], max_point[1], max_point[2]]
+        ])
+        homogeneous_vertices = torch.cat((bbox_vertices, torch.ones(bbox_vertices.size(0), 1)), dim=1)
+
+        transformed_vertices = (transform_matrix @ homogeneous_vertices.T).T
+        scaled_transformed_vertices = transformed_vertices * scale_factor
+        # print(scaled_transformed_vertices)
+        # tensor([[ 0.4171, -0.2363,  0.7499],
+        #         [-0.1194, -0.2066,  0.3771],
+        #         [ 0.6781, -0.2254,  0.3753],
+        #         [ 0.1415, -0.1958,  0.0024],
+        #         [ 0.4279,  0.2168,  0.7705],
+        #         [-0.1087,  0.2464,  0.3976],
+        #         [ 0.6888,  0.2276,  0.3958],
+        #         [ 0.1523,  0.2572,  0.0230]])
+
+        # construct new aabb (now it's bbox of bbox)
+        # TODO: use oriented bbox to further refine
+        new_min_point = torch.min(scaled_transformed_vertices, dim=0)[0]
+        new_max_point = torch.max(scaled_transformed_vertices, dim=0)[0]
+        self.object_aabb = torch.vstack([new_min_point, new_max_point])
+
+
+        # TODO: initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) inside the scene_box (can be extracted from dataparser_outputs)
+        # where each vertex stores a boolean indicating objectness (whether it is inside the masked object)
+        # add a new method "object_mask_from_2d_masks", where vertices are projected (using projection matrix derived from dataparser_outputs.cameras) 
+        # to all 2D image planes to identify those falling into all 2D masks
+        # can consider tricks such as coarse-to-fine or sorting the 2D mask areas
+
+        # train_dataparser_outputs.scene_box.aabb: tensor([[-1., -1., -1.],
+        # [ 1.,  1.,  1.]])
+
+        # train_dataparser_outputs.dataparser_transform: tensor([[ 0.0237,  0.5714, -0.8204,  0.4603],
+        # [ 0.9987,  0.0237,  0.0453,  0.5088],
+        # [ 0.0453, -0.8204, -0.5701,  0.0188]])  
+
+        # train_dataparser_outputs.dataparser_scale: 0.18077436331220487
+
+
+        # self.train_dataparser_outputs.mask_filenames see base_dataset.py
+        
+              
+        # train_dataparser_outputs.cameras.camera_to_worlds.shape: torch.Size([92, 3, 4])
+        # eval_dataparser_outputs.cameras.camera_to_worlds.shape: torch.Size([10, 3, 4])
+
+        # train_dataparser_outputs.cameras.camera_to_worlds: tensor([[[-0.6875, -0.2085,  0.6956,  0.4388],
+        #  [ 0.7217, -0.3026,  0.6226,  0.5472],
+        #  [ 0.0807,  0.9300,  0.3585, -0.1125]],
+
+        # [[-0.7197, -0.2948,  0.6286,  0.4750],
+        #  [ 0.6891, -0.4142,  0.5947,  0.5637],
+        #  [ 0.0850,  0.8611,  0.5012,  0.0806]],
+
+        # [[-0.7125, -0.4204,  0.5617,  0.4329],
+        #  [ 0.6960, -0.5244,  0.4904,  0.4963],
+        #  [ 0.0884,  0.7404,  0.6663,  0.2943]],
+
+        # ...,
+
+        # [[ 0.6586,  0.0963, -0.7463, -0.8793],
+        #  [-0.7522,  0.0567, -0.6565, -0.5146],
+        #  [-0.0209,  0.9937,  0.1098, -0.3204]],
+
+        # [[ 0.9955, -0.0134,  0.0938, -0.0869],
+        #  [ 0.0888,  0.4768, -0.8745, -0.7867],
+        #  [-0.0330,  0.8789,  0.4759,  0.0319]],
+
+        # [[-0.4821, -0.1433,  0.8643,  0.6406],
+        #  [ 0.8727, -0.1656,  0.4594,  0.4534],
+        #  [ 0.0773,  0.9757,  0.2049, -0.1915]]])
+        
         # Spawn is critical for not freezing the program (PyTorch compatability issue)
         # check if spawn is already set
         if mp.get_start_method(allow_none=True) is None:
@@ -269,6 +365,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             input_dataset=self.eval_dataset,
             device=self.device,
             num_workers=self.world_size * 4,
+            object_aabb=self.object_aabb, # new
         )
 
     def next_train(self, step: int) -> Tuple[RayBundle, Dict]:

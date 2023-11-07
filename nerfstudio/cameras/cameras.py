@@ -500,8 +500,8 @@ class Cameras(TensorDataclass):
 
         # Keep fars as it is, change nears
         # hardcoded for lego
-        object_aabb = torch.tensor([[-1.58240465, -2.3752433 , -3.95161623],
-                                    [ 0.92683118,  0.15093034, -0.33374367]])
+        # object_aabb = torch.tensor([[-1.58240465, -2.3752433 , -3.95161623],
+        #                             [ 0.92683118,  0.15093034, -0.33374367]])
         if object_aabb is not None:
             with torch.no_grad():
                 rays_o = raybundle.origins.contiguous()
@@ -520,9 +520,8 @@ class Cameras(TensorDataclass):
 
                 raybundle.nears = t_max
                 raybundle.fars = 1000 * torch.ones_like(raybundle.nears)
-
-        print(f"NEARS[0,0]: {raybundle.nears[0,0]}, \n")
-        print(f"FARS[0,0]: {raybundle.fars[0,0]}\n")
+        # print(f"NEARS[0,0]: {raybundle.nears[0,0]}, \n")
+        # print(f"FARS[0,0]: {raybundle.fars[0,0]}\n")
 
         # TODO: We should have to squeeze the last dimension here if we started with zero batch dims, but never have to,
         # so there might be a rogue squeeze happening somewhere, and this may cause some unintended behaviour
