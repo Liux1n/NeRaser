@@ -240,31 +240,31 @@ def intersect_aabb(
 
     return t_min, t_max
 
-# added by cs
-def intersect_objectbox(
-    origins: torch.Tensor,
-    directions: torch.Tensor,
-    aabb: torch.Tensor,
-    max_bound: float = 1e10,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+# # added by cs
+# def intersect_objectbox(
+#     origins: torch.Tensor,
+#     directions: torch.Tensor,
+#     aabb: torch.Tensor,
+#     max_bound: float = 1e10,
+# ) -> Tuple[torch.Tensor, torch.Tensor]:
 
-    tx_min = (aabb[:3] - origins) / directions
-    tx_max = (aabb[3:] - origins) / directions
+#     tx_min = (aabb[:3] - origins) / directions
+#     tx_max = (aabb[3:] - origins) / directions
 
-    t_min = torch.stack((tx_min, tx_max)).amin(dim=0)
-    t_max = torch.stack((tx_min, tx_max)).amax(dim=0)
+#     t_min = torch.stack((tx_min, tx_max)).amin(dim=0)
+#     t_max = torch.stack((tx_min, tx_max)).amax(dim=0)
 
-    t_min = t_min.amax(dim=-1)
-    t_max = t_max.amin(dim=-1)
+#     t_min = t_min.amax(dim=-1)
+#     t_max = t_max.amin(dim=-1)
 
-    t_min = torch.clamp(t_min, min=0, max=max_bound)
-    t_max = torch.clamp(t_max, min=0, max=max_bound)
+#     t_min = torch.clamp(t_min, min=0, max=max_bound)
+#     t_max = torch.clamp(t_max, min=0, max=max_bound)
 
-    cond = t_max <= t_min
-    t_min = torch.where(cond, 0, t_min)
-    t_max = torch.where(cond, 0, t_max)
+#     cond = t_max <= t_min
+#     t_min = torch.where(cond, 0, t_min)
+#     t_max = torch.where(cond, 0, t_max)
 
-    return t_min, t_max
+#     return t_min, t_max
 
 def intersect_obb(
     origins: torch.Tensor,
@@ -301,6 +301,28 @@ def intersect_obb(
 
     return t_min, t_max
 
+# # added by cs
+# def intersect_oriented_objectbox(
+#     origins: torch.Tensor,
+#     directions: torch.Tensor,
+#     obb: OrientedBox,
+#     max_bound: float = 1e10,
+# ):
+#     # Transform ray to OBB space
+#     R, T, S = obb.R, obb.T, obb.S.to(origins.device)
+#     H = torch.eye(4, device=origins.device, dtype=origins.dtype)
+#     H[:3, :3] = R
+#     H[:3, 3] = T
+#     H_world2bbox = torch.inverse(H)
+#     origins = torch.cat((origins, torch.ones_like(origins[..., :1])), dim=-1)
+#     origins = torch.matmul(H_world2bbox, origins.T).T[..., :3]
+#     directions = torch.matmul(H_world2bbox[:3, :3], directions.T).T
+
+#     # Compute intersection with axis-aligned bounding box with min as -S and max as +S
+#     aabb = torch.concat((-S / 2, S / 2))
+#     t_min, t_max = intersect_objectbox(origins, directions, aabb, max_bound=max_bound)
+
+#     return t_min, t_max
 
 def safe_normalize(
     vectors: Float[Tensor, "*batch_dim N"],

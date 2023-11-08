@@ -60,6 +60,8 @@ from nerfstudio.data.utils.dataloaders import (
 from nerfstudio.model_components.ray_generators import RayGenerator
 from nerfstudio.utils.rich_utils import CONSOLE
 
+# new
+from nerfstudio.data.scene_box import OrientedBox
 
 @dataclass
 class ParallelDataManagerConfig(VanillaDataManagerConfig):
@@ -233,6 +235,34 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         new_max_point = torch.max(scaled_transformed_vertices, dim=0)[0]
         self.object_aabb = torch.vstack([new_min_point, new_max_point])
 
+        # refined oriented box
+        # obb_S = (max_point - min_point) * scale_factor
+        # obb_R = transform_matrix[:3, :3]
+        # obb_T = transform_matrix[:3, -1]
+
+        # another way to get R (Rodrigues)
+        target_z = scaled_transformed_vertices[1] - scaled_transformed_vertices[0]
+        normalized_target_z = target_z / torch.linalg.norm(target_z)
+        source_z = torch.tensor([0., 0., 1.])
+        # print(source_z, normalized_target_z)
+        v = torch.cross(source_z, normalized_target_z)
+        c = torch.dot(source_z, normalized_target_z)
+        s = v.norm()
+        kmat = torch.tensor([[0, -v[2], v[1]],
+                            [v[2], 0, -v[0]],
+                            [-v[1], v[0], 0]])
+        obb_R = torch.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s ** 2))
+
+        # get S
+        target_x = scaled_transformed_vertices[4] - scaled_transformed_vertices[0]
+        target_y = scaled_transformed_vertices[2] - scaled_transformed_vertices[0]
+        obb_S = torch.tensor([torch.linalg.norm(target_x), torch.linalg.norm(target_y), torch.linalg.norm(target_z)])
+
+        # get T
+        obb_T = torch.mean(scaled_transformed_vertices, dim=0)
+
+        self.object_obb = OrientedBox(R=obb_R, T=obb_T, S=obb_S)
+
 
         # TODO: initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) inside the scene_box (can be extracted from dataparser_outputs)
         # where each vertex stores a boolean indicating objectness (whether it is inside the masked object)
@@ -249,6 +279,11 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
         # train_dataparser_outputs.dataparser_scale: 0.18077436331220487
 
+        # eval_dataparser_outputs.dataparser_transform: tensor([[ 0.0237,  0.5714, -0.8204,  0.4603],
+        # [ 0.9987,  0.0237,  0.0453,  0.5088],
+        # [ 0.0453, -0.8204, -0.5701,  0.0188]])
+
+        # eval_dataparser_outputs.dataparser_scale: 0.18077436331220487
 
         # self.train_dataparser_outputs.mask_filenames see base_dataset.py
         
@@ -281,6 +316,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         # [[-0.4821, -0.1433,  0.8643,  0.6406],
         #  [ 0.8727, -0.1656,  0.4594,  0.4534],
         #  [ 0.0773,  0.9757,  0.2049, -0.1915]]])
+
+        # raise NotImplementedError
         
         # Spawn is critical for not freezing the program (PyTorch compatability issue)
         # check if spawn is already set
@@ -365,7 +402,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             input_dataset=self.eval_dataset,
             device=self.device,
             num_workers=self.world_size * 4,
-            object_aabb=self.object_aabb, # new
+            # object_aabb=self.object_aabb, # new
+            object_obb=self.object_obb, # new
         )
 
     def next_train(self, step: int) -> Tuple[RayBundle, Dict]:

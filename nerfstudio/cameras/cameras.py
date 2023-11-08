@@ -329,6 +329,7 @@ class Cameras(TensorDataclass):
         obb_box: Optional[OrientedBox] = None,
         # new
         object_aabb: Optional[Float[Tensor, "2 3"]] = None,
+        object_obb: Optional[OrientedBox] = None,
     ) -> RayBundle:
         """Generates rays for the given camera indices.
 
@@ -502,7 +503,7 @@ class Cameras(TensorDataclass):
         # hardcoded for lego
         # object_aabb = torch.tensor([[-1.58240465, -2.3752433 , -3.95161623],
         #                             [ 0.92683118,  0.15093034, -0.33374367]])
-        if object_aabb is not None:
+        if object_aabb is not None or object_obb is not None:
             with torch.no_grad():
                 rays_o = raybundle.origins.contiguous()
                 rays_d = raybundle.directions.contiguous()
@@ -512,9 +513,16 @@ class Cameras(TensorDataclass):
                 rays_o = rays_o.reshape((-1, 3))
                 rays_d = rays_d.reshape((-1, 3))
 
-                object_tensor_aabb = Parameter(object_aabb.flatten(), requires_grad=False)
-                object_tensor_aabb = object_tensor_aabb.to(rays_o.device)
-                t_min, t_max = nerfstudio.utils.math.intersect_objectbox(rays_o, rays_d, object_tensor_aabb)
+                if object_aabb is not None:
+                    object_tensor_aabb = Parameter(object_aabb.flatten(), requires_grad=False)
+                    object_tensor_aabb = object_tensor_aabb.to(rays_o.device)
+                    # t_min, t_max = nerfstudio.utils.math.intersect_objectbox(rays_o, rays_d, object_tensor_aabb)
+                    t_min, t_max = nerfstudio.utils.math.intersect_aabb(rays_o, rays_d, object_tensor_aabb, invalid_value=0)
+                elif object_obb is not None:
+                    # t_min, t_max = nerfstudio.utils.math.intersect_oriented_objectbox(rays_o, rays_d, object_obb)
+                    t_min, t_max = nerfstudio.utils.math.intersect_obb(rays_o, rays_d, object_obb, invalid_value=0)
+                else:
+                    assert False
 
                 t_max = t_max.reshape([-1, 1])
 
