@@ -62,6 +62,8 @@ from nerfstudio.utils.rich_utils import CONSOLE
 
 # new
 from nerfstudio.data.scene_box import OrientedBox
+import numpy as np
+from itertools import compress
 
 @dataclass
 class ParallelDataManagerConfig(VanillaDataManagerConfig):
@@ -189,6 +191,9 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.eval_dataset = self.create_eval_dataset()
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
 
+        
+
+
         # TODO: as an argument / derive it here
         # hardcoded object_aabb for lego
         # self.object_aabb = torch.tensor([[-1.58240465, -2.3752433 , -3.95161623],
@@ -197,9 +202,9 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
                                          [ 0.92683118, 2.3752433, 3.95161623]])
         
         # transform using dataparser_transform and dataparser_scale
-        transform_matrix = self.train_dataparser_outputs.dataparser_transform
+        self.transform_matrix = self.train_dataparser_outputs.dataparser_transform
         scale_factor = self.train_dataparser_outputs.dataparser_scale
-
+        
         # Extract min and max points
         min_point = self.object_aabb[0]
         max_point = self.object_aabb[1]
@@ -217,8 +222,10 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         ])
         homogeneous_vertices = torch.cat((bbox_vertices, torch.ones(bbox_vertices.size(0), 1)), dim=1)
 
-        transformed_vertices = (transform_matrix @ homogeneous_vertices.T).T
+        transformed_vertices = (self.transform_matrix @ homogeneous_vertices.T).T
         scaled_transformed_vertices = transformed_vertices * scale_factor
+        self.vertices = transformed_vertices
+        #self.vertices = bbox_vertices
         # print(scaled_transformed_vertices)
         # tensor([[ 0.4171, -0.2363,  0.7499],
         #         [-0.1194, -0.2066,  0.3771],
@@ -251,7 +258,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         kmat = torch.tensor([[0, -v[2], v[1]],
                             [v[2], 0, -v[0]],
                             [-v[1], v[0], 0]])
-        obb_R = torch.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s ** 2))
+        obb_R = torch.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s ** 2)) #obb_R.shape
 
         # get S
         target_x = scaled_transformed_vertices[4] - scaled_transformed_vertices[0]
@@ -392,6 +399,82 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.iter_eval_image_dataloader = iter(self.eval_image_dataloader)
         self.eval_pixel_sampler = self._get_pixel_sampler(self.eval_dataset, self.config.eval_num_rays_per_batch)  # type: ignore
         self.eval_ray_generator = RayGenerator(self.eval_dataset.cameras.to(self.device))
+
+
+        #TODO: surface detection
+
+        # generate ray for surface detection from evaluation dataset
+        
+        self.surface_detection_dataset = self.eval_dataset
+
+        self.mask = [item for item in self.surface_detection_dataset] 
+        self.surface_detection_pixel_sampler = self._get_pixel_sampler(self.surface_detection_dataset, self.config.eval_num_rays_per_batch)
+        
+        #print(self.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
+        # white is 1, black is 0
+        y_outbound = self.mask[0]['mask'].shape[0] # 764
+
+        for i, item in enumerate(self.mask):
+            mask_array = item['mask'].numpy().squeeze()
+            y, x = np.where(mask_array == 0)
+            max_y = np.max(y)
+            max_x = np.max(x)
+            min_x = np.min(x)
+            width = max_x - min_x
+            bottom_pixel = (max_y+5, x[np.argmax(y)]) # find a pixel that is below the mask
+            self.mask[i]['bottom_pixel'] = bottom_pixel
+            self.mask[i]['width'] = width
+
+        # filter out out-of-bound indices
+        self.surface_detection_camera = self.surface_detection_dataset.cameras
+        
+        #print(len(self.surface_detection_camera))
+        #print(self.surface_detection_camera[0])
+        mask_dataset = np.array([item['bottom_pixel'][0] < y_outbound for item in self.mask])
+        # Get the indices of the items to keep
+        indices_to_keep = [i for i, mask in enumerate(mask_dataset) if mask]
+
+        # Store the indices to keep
+        self.indices_to_keep = indices_to_keep
+        #print(self.indices_to_keep)
+        #Create a filtered list of cameras
+        self.filtered_cameras = [self.surface_detection_camera[i] for i in self.indices_to_keep]
+        #print(filtered_cameras)
+        # create ray indices from bottom pixels, 3 rays per indices
+        self.ray_indices = torch.zeros((3*len(self.mask), 3),dtype=int)
+        offset = 0
+        for i, item in enumerate(self.mask):
+  
+            self.ray_indices[offset][0] = int(item['image_idx']) # camera index
+            self.ray_indices[offset][1] = int(item['bottom_pixel'][0]) # y
+            self.ray_indices[offset][2] = int(item['bottom_pixel'][1]) # x
+            self.ray_indices[offset+1][0] = int(item['image_idx'])
+            self.ray_indices[offset+1][1] = int(item['bottom_pixel'][0]) # y
+            self.ray_indices[offset+1][2] = int(item['bottom_pixel'][1]) + item['width']/8 # x
+            self.ray_indices[offset+2][0] = int(item['image_idx'])
+            self.ray_indices[offset+2][1] = int(item['bottom_pixel'][0]) # y
+            self.ray_indices[offset+2][2] = int(item['bottom_pixel'][1]) - item['width']/8 # x
+            offset += 3
+
+        mask = self.ray_indices[:, 1] <= y_outbound
+
+        # Use the mask to filter self.ray_indices
+        self.ray_indices = self.ray_indices[mask]
+        #print('ray indices',self.ray_indices)
+        #print(len(self.surface_detection_dataset)) # 9
+        #print(len(self.surface_detection_camera))
+        self.surface_detection_ray_generator = RayGenerator(self.surface_detection_camera.to(self.device))
+
+
+        # create ray bundle from ray indices
+        self.ray_bundle_surface_detection = self.surface_detection_ray_generator(self.ray_indices)
+
+        # expand self.filtered_cameras to align with self.ray_indices
+        self.expanded_cameras = [camera for camera in self.filtered_cameras for _ in range(3)]
+
+
+
+        #######################################################################
         # for loading full images
         self.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
             input_dataset=self.eval_dataset,

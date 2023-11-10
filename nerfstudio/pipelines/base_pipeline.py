@@ -49,7 +49,7 @@ from nerfstudio.data.datamanagers.parallel_datamanager import ParallelDataManage
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import profiler
-
+from nerfstudio.cameras.rays import RayBundle
 
 def module_wrapper(ddp_or_model: Union[DDP, Model]) -> Model:
     """
@@ -325,6 +325,32 @@ class VanillaPipeline(Pipeline):
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
         self.train()
         return model_outputs, loss_dict, metrics_dict
+    
+    #new function
+    @profiler.time_function
+    def get_surface_detection(self, step: int, ray_bundle: RayBundle) -> Tuple[Any]:
+        """This function gets the results of surface detection.
+
+        Args:
+            step: current iteration step
+            ray_bundle: ray bundle to pass to model
+        """
+        self.eval()
+        # TODO：which depth to use?
+        model_outputs = self.model(ray_bundle) # depth / expected_depth / prop_depth_0 / prop_depth_1
+        depth = model_outputs["depth"]
+        
+        '''
+        RayBundle(origins=tensor([0.2350, 0.7207, 0.0918], device='cuda:0'), directions=tensor([-0.5048, -0.4801, -0.7174], device='cuda:0'), pixel_area=tensor([1.4408e-06], device='cuda:0'), camera_indices=tensor([0], device='cuda:0'), nears=None, fars=None, metadata={'directions_norm': tensor([1.0684], device='cuda:0')}, times=None)
+        Cameras(camera_to_worlds=tensor([[-0.9044, -0.1032,  0.4140,  0.2350],
+        [ 0.4046, -0.5151,  0.7556,  0.7207],
+        [ 0.1353,  0.8509,  0.5076,  0.0918]]), fx=tensor([748.3732]), fy=tensor([748.0125]), cx=tensor([503.8019]), cy=tensor([387.5774]), width=tensor([1015]), height=tensor([764]), distortion_params=tensor([ 3.4626e-02, -4.4362e-02,  0.0000e+00,  0.0000e+00, -1.3047e-03,
+        -5.7565e-05]), camera_type=tensor([1]), times=None, metadata=None)
+        '''
+
+        self.train()
+        return depth
+
 
     @profiler.time_function
     def get_eval_image_metrics_and_images(self, step: int):

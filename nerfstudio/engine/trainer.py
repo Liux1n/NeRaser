@@ -43,6 +43,12 @@ from rich import box, style
 from rich.panel import Panel
 from rich.table import Table
 from torch.cuda.amp.grad_scaler import GradScaler
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 
 TRAIN_INTERATION_OUTPUT = Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
 TORCH_DEVICE = str
@@ -283,6 +289,90 @@ class Trainer:
                     writer.put_scalar(
                         name="GPU Memory (MB)", scalar=torch.cuda.max_memory_allocated() / (1024**2), step=step
                     )
+
+                if self.pipeline.datamanager.ray_bundle_surface_detection and step == 10:
+                    output = self.pipeline.get_surface_detection(step, self.pipeline.datamanager.ray_bundle_surface_detection)
+
+                    '''
+                    RayBundle(origins=tensor([0.2350, 0.7207, 0.0918], device='cuda:0'), directions=tensor([-0.5048, -0.4801, -0.7174], device='cuda:0'), pixel_area=tensor([1.4408e-06], device='cuda:0'), camera_indices=tensor([0], device='cuda:0'), nears=None, fars=None, metadata={'directions_norm': tensor([1.0684], device='cuda:0')}, times=None)
+                    Cameras(camera_to_worlds=tensor([[-0.9044, -0.1032,  0.4140,  0.2350],
+                    [ 0.4046, -0.5151,  0.7556,  0.7207],
+                    [ 0.1353,  0.8509,  0.5076,  0.0918]]), fx=tensor([748.3732]), fy=tensor([748.0125]), cx=tensor([503.8019]), cy=tensor([387.5774]), width=tensor([1015]), height=tensor([764]), distortion_params=tensor([ 3.4626e-02, -4.4362e-02,  0.0000e+00,  0.0000e+00, -1.3047e-03,
+                    -5.7565e-05]), camera_type=tensor([1]), times=None, metadata=None)
+                    '''
+                    num_image = len(self.pipeline.datamanager.expanded_cameras)
+                    print(num_image, len(output))
+                    assert num_image == len(output) , f"false length"
+
+                    transform_matrix = self.pipeline.datamanager.transform_matrix
+                    world_xyz = []
+                    for i in range(num_image):
+                     
+                        fx = self.pipeline.datamanager.expanded_cameras[i].fx
+                        fy = self.pipeline.datamanager.expanded_cameras[i].fy
+                        cx = self.pipeline.datamanager.expanded_cameras[i].cx
+                        cy = self.pipeline.datamanager.expanded_cameras[i].cy
+                        c2w = self.pipeline.datamanager.expanded_cameras[i].camera_to_worlds
+                        depth = output[i].to(fx.device)
+                        y = self.pipeline.datamanager.ray_indices[i][1]
+                        x = self.pipeline.datamanager.ray_indices[i][2]
+                        # xyz in camera coordinates
+                        X = (x - cx) * depth / fx
+                        Y = (y - cy) * depth / fy
+                        Z = depth
+                        # Convert to world coordinates
+                        camera_xyz = torch.stack([X, Y, Z, torch.ones_like(X)], dim=-1)
+                        c2w = c2w.to(camera_xyz.device)
+                        #world_xyz.append((c2w @ camera_xyz.T).T[..., :3])
+                        world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
+                        # Transform the world coordinates
+                        world_coordinates_homogeneous = torch.cat([world_coordinates, torch.ones(len(world_coordinates), 1)], dim=-1)
+                        transformed_world_coordinates = (transform_matrix.to(world_coordinates_homogeneous.device) @ world_coordinates_homogeneous.T).T[..., :3]
+
+                        world_xyz.append(transformed_world_coordinates)
+                    
+                    # calculate the plane equation using linear regression
+                    # Flatten the world_xyz list and convert it to a numpy array
+                    world_xyz_np = np.concatenate([xyz.numpy() for xyz in world_xyz], axis=0)
+                    # Create a LinearRegression object
+                    reg = LinearRegression()
+
+                    # Fit the model to the data
+                    reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2])
+
+                    # The coefficients a, b are in reg.coef_, and the intercept d is in reg.intercept_
+                    a, b = reg.coef_
+                    d = reg.intercept_
+                    c = -1
+
+                    # Create a 3D plot
+                    fig = plt.figure()
+                    ax = fig.add_subplot(111, projection='3d')
+                    ax.set_title('bbox with transformation')
+                    ## Plot the points in world_xyz
+                    #for xyz in world_xyz:
+                    #    ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2])
+
+                    # Plot the plane
+                    xx, yy = np.meshgrid(range(-10, 10), range(-10, 10))
+                    zz = (-a * xx - b * yy - d) / c
+                    ax.plot_surface(xx, yy, zz, alpha=0.5)
+
+                    vertices = self.pipeline.datamanager.vertices
+                    #print(vertices.shape) # 8 x 3
+                    #TODO: plot the vertices
+                    # Plot the vertices
+                    for vertex in vertices:
+                        ax.scatter(*vertex)
+
+                    # Plot the bbox
+                    #plt.show()
+
+                    # The equation of the plane is `ax + by + cz + d = 0`
+                    CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
+               
+                    #print(world_xyz)
+                    #print(output_surface_detection) # depth / expected_depth / prop_depth_0 / prop_depth_1
 
                 # Do not perform evaluation if there are no validation images
                 if self.pipeline.datamanager.eval_dataset:

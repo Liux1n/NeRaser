@@ -238,6 +238,7 @@ class PixelSampler:
         indices = torch.cat(all_indices, dim=0)
 
         c, y, x = (i.flatten() for i in torch.split(indices, 1, dim=-1))
+        #print(c)
         collated_batch = {
             key: value[c, y, x]
             for key, value in batch.items()
