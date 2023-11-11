@@ -456,7 +456,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             self.ray_indices[offset+2][2] = int(item['bottom_pixel'][1]) - item['width']/8 # x
             offset += 3
 
-        mask = self.ray_indices[:, 1] <= y_outbound
+        mask = self.ray_indices[:, 1] < y_outbound
 
         # Use the mask to filter self.ray_indices
         self.ray_indices = self.ray_indices[mask]

@@ -345,6 +345,11 @@ class Trainer:
                     d = reg.intercept_
                     c = -1
 
+                    vertices = self.pipeline.datamanager.vertices
+
+
+                    #uncomment this for visualization
+                    '''
                     # Create a 3D plot
                     fig = plt.figure()
                     ax = fig.add_subplot(111, projection='3d')
@@ -358,7 +363,7 @@ class Trainer:
                     zz = (-a * xx - b * yy - d) / c
                     ax.plot_surface(xx, yy, zz, alpha=0.5)
 
-                    vertices = self.pipeline.datamanager.vertices
+                    
                     #print(vertices.shape) # 8 x 3
                     #TODO: plot the vertices
                     # Plot the vertices
@@ -366,12 +371,14 @@ class Trainer:
                         ax.scatter(*vertex)
 
                     # Plot the bbox
+                    
                     #plt.show()
-
+                    '''
                     # The equation of the plane is `ax + by + cz + d = 0`
                     CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
-               
-                    #print(world_xyz)
+
+                    # TODO: calculate the intersection of the obb and the plane to derive the NSA
+         
                     #print(output_surface_detection) # depth / expected_depth / prop_depth_0 / prop_depth_1
 
                 # Do not perform evaluation if there are no validation images

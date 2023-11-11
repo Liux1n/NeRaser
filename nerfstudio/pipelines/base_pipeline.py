@@ -298,6 +298,38 @@ class VanillaPipeline(Pipeline):
         """
         ray_bundle, batch = self.datamanager.next_train(step)
         model_outputs = self._model(ray_bundle)  # train distributed data parallel model if world_size > 1
+        #print(model_outputs['rgb'].shape) # torch.Size([4096, 3])
+        #print(batch)
+        '''
+        {'image': tensor([[0.4157, 0.2863, 0.2549],
+        [0.9020, 0.8157, 0.7255],
+        [0.2510, 0.1961, 0.1843],
+        ...,
+        [0.2706, 0.1922, 0.1451],
+        [0.3882, 0.2039, 0.1333],
+        [0.9137, 0.8039, 0.7373]]), 'mask': tensor([[True],
+        [True],
+        [True],
+        ...,
+        [True],
+        [True],
+        [True]]), 'indices': tensor([[ 77, 150,  11],
+        [ 65, 423, 823],
+        [ 15,  43, 623],
+        ...,
+        [ 28,  67, 114],
+        [ 79, 662, 268],
+        [ 33, 132, 457]])}
+        '''
+        # TODO: 
+        # 1. get camera of training image with batch['indices'].
+        # 2. use the camera and the world coordinate of the NSA(defined by four corners) to get the camera coordinate of the NSA using w2c = torch.inverse(c2w)
+        # 3. Identify the NSA area in the training image using the camera coordinate of the NSA
+        # 4. Inpaint the NSA area in the training image after it is fed into the model
+        # 5. Use the inpainted image as GT
+        # 6. Could modify the loss function!
+
+
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
 
