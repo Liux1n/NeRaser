@@ -203,7 +203,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         
         # transform using dataparser_transform and dataparser_scale
         self.transform_matrix = self.train_dataparser_outputs.dataparser_transform
-        scale_factor = self.train_dataparser_outputs.dataparser_scale
+        self.scale_factor = self.train_dataparser_outputs.dataparser_scale
         
         # Extract min and max points
         min_point = self.object_aabb[0]
@@ -223,8 +223,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         homogeneous_vertices = torch.cat((bbox_vertices, torch.ones(bbox_vertices.size(0), 1)), dim=1)
 
         transformed_vertices = (self.transform_matrix @ homogeneous_vertices.T).T
-        scaled_transformed_vertices = transformed_vertices * scale_factor
-        self.vertices = transformed_vertices
+        scaled_transformed_vertices = transformed_vertices * self.scale_factor
+        self.vertices = scaled_transformed_vertices
         #self.vertices = bbox_vertices
         # print(scaled_transformed_vertices)
         # tensor([[ 0.4171, -0.2363,  0.7499],

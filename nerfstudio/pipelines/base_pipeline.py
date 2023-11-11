@@ -325,7 +325,7 @@ class VanillaPipeline(Pipeline):
         # 1. get camera of training image with batch['indices'].
         # 2. use the camera and the world coordinate of the NSA(defined by four corners) to get the camera coordinate of the NSA using w2c = torch.inverse(c2w)
         # 3. Identify the NSA area in the training image using the camera coordinate of the NSA
-        # 4. Inpaint the NSA area in the training image after it is fed into the model
+        # 4. Inpaint the NSA area in the training image after it is fed into the modelpi
         # 5. Use the inpainted image as GT
         # 6. Could modify the loss function!
 

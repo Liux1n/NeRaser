@@ -305,6 +305,7 @@ class Trainer:
                     assert num_image == len(output) , f"false length"
 
                     transform_matrix = self.pipeline.datamanager.transform_matrix
+                    scale_factor = self.pipeline.datamanager.scale_factor
                     world_xyz = []
                     for i in range(num_image):
                      
@@ -328,8 +329,8 @@ class Trainer:
                         # Transform the world coordinates
                         world_coordinates_homogeneous = torch.cat([world_coordinates, torch.ones(len(world_coordinates), 1)], dim=-1)
                         transformed_world_coordinates = (transform_matrix.to(world_coordinates_homogeneous.device) @ world_coordinates_homogeneous.T).T[..., :3]
-
-                        world_xyz.append(transformed_world_coordinates)
+                        scaled_transformed_world_coordinates = transformed_world_coordinates * scale_factor
+                        world_xyz.append(scaled_transformed_world_coordinates)
                     
                     # calculate the plane equation using linear regression
                     # Flatten the world_xyz list and convert it to a numpy array
@@ -349,7 +350,7 @@ class Trainer:
 
 
                     #uncomment this for visualization
-                    '''
+                    
                     # Create a 3D plot
                     fig = plt.figure()
                     ax = fig.add_subplot(111, projection='3d')
@@ -359,7 +360,7 @@ class Trainer:
                     #    ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2])
 
                     # Plot the plane
-                    xx, yy = np.meshgrid(range(-10, 10), range(-10, 10))
+                    xx, yy = np.meshgrid(range(-5, 5), range(-5, 5))
                     zz = (-a * xx - b * yy - d) / c
                     ax.plot_surface(xx, yy, zz, alpha=0.5)
 
@@ -372,8 +373,8 @@ class Trainer:
 
                     # Plot the bbox
                     
-                    #plt.show()
-                    '''
+                    plt.show()
+                    
                     # The equation of the plane is `ax + by + cz + d = 0`
                     CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
 
