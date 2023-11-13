@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 from typing import Dict, List, Literal, Optional, Tuple, Type, cast
-
+import wandb
 import torch
 from nerfstudio.configs.experiment_config import ExperimentConfig
 from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManager
@@ -289,8 +289,10 @@ class Trainer:
                     writer.put_scalar(
                         name="GPU Memory (MB)", scalar=torch.cuda.max_memory_allocated() / (1024**2), step=step
                     )
-
-                if self.pipeline.datamanager.ray_bundle_surface_detection and step == 10:
+                if step == 0:
+                    offset = 1
+                t = 0
+                if self.pipeline.datamanager.ray_bundle_surface_detection and step == 20*offset:
                     output = self.pipeline.get_surface_detection(step, self.pipeline.datamanager.ray_bundle_surface_detection)
 
                     '''
@@ -346,21 +348,33 @@ class Trainer:
                     d = reg.intercept_
                     c = -1
 
+                    # The equation of the plane is `ax + by + cz + d = 0`
+                    #CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
+
                     vertices = self.pipeline.datamanager.vertices
 
+                    #calculate difference between planes over steps
 
+
+                    t_temp = -(a*3 + b*3 + d) / c
+                    
+                    diff = abs(t - t_temp)
+                    t = t_temp
+
+                    writer.put_scalar(name="Plane Difference", scalar=diff, step=step)
+                    offset += 1
                     #uncomment this for visualization
                     
                     # Create a 3D plot
                     fig = plt.figure()
                     ax = fig.add_subplot(111, projection='3d')
-                    ax.set_title('bbox with transformation')
+                    ax.set_title('plane and bbox with transformation and scaling')
                     ## Plot the points in world_xyz
                     #for xyz in world_xyz:
                     #    ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2])
 
                     # Plot the plane
-                    xx, yy = np.meshgrid(range(-5, 5), range(-5, 5))
+                    xx, yy = np.meshgrid(range(-3, 3), range(-3, 3))
                     zz = (-a * xx - b * yy - d) / c
                     ax.plot_surface(xx, yy, zz, alpha=0.5)
 
@@ -370,14 +384,10 @@ class Trainer:
                     # Plot the vertices
                     for vertex in vertices:
                         ax.scatter(*vertex)
-
                     # Plot the bbox
                     
-                    plt.show()
-                    
-                    # The equation of the plane is `ax + by + cz + d = 0`
-                    CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
-
+                    #plt.show()
+            
                     # TODO: calculate the intersection of the obb and the plane to derive the NSA
          
                     #print(output_surface_detection) # depth / expected_depth / prop_depth_0 / prop_depth_1
