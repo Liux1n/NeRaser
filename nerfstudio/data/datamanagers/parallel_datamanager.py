@@ -270,6 +270,11 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
         self.object_obb = OrientedBox(R=obb_R, T=obb_T, S=obb_S)
 
+        # prepare 3 directional vectors (with unnormalized lengths) for never-seen area detection as polygons
+        self.dir_x = target_x # self.vertices: 0 -> 4, 1 -> 5, 2 -> 6, 3 -> 7
+        self.dir_y = target_y # self.vertices: 0 -> 2, 1 -> 3, 4 -> 6, 5 -> 7
+        self.dir_z = target_z # self.vertices: 0 -> 1, 2 -> 3, 4 -> 5, 6 -> 7
+
 
         # TODO: initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) inside the scene_box (can be extracted from dataparser_outputs)
         # where each vertex stores a boolean indicating objectness (whether it is inside the masked object)

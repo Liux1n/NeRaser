@@ -292,7 +292,8 @@ class Trainer:
                 if step == 0:
                     offset = 1
                 t = 0
-                if self.pipeline.datamanager.ray_bundle_surface_detection and step == 20*offset:
+                # if self.pipeline.datamanager.ray_bundle_surface_detection and step == 20*offset:
+                if self.pipeline.datamanager.ray_bundle_surface_detection and step % 20 == 0:
                     output = self.pipeline.get_surface_detection(step, self.pipeline.datamanager.ray_bundle_surface_detection)
 
                     '''
@@ -361,8 +362,9 @@ class Trainer:
                     diff = abs(t - t_temp)
                     t = t_temp
 
-                    writer.put_scalar(name="Plane Difference", scalar=diff, step=step)
-                    offset += 1
+                    # writer.put_scalar(name="Plane Difference", scalar=diff, step=step)
+                    print(f"Plane Difference: {diff}")
+                    # offset += 1
                     #uncomment this for visualization
                     
                     # Create a 3D plot

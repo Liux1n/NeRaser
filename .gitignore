@@ -192,3 +192,4 @@ camera_paths/
 slurm_logs/
 NeRaser/
 my_scripts/
+nsa_identification.py
