@@ -293,7 +293,7 @@ class Trainer:
                     offset = 1
                 t = 0
                 # if self.pipeline.datamanager.ray_bundle_surface_detection and step == 20*offset:
-                if self.pipeline.datamanager.ray_bundle_surface_detection and step % 20 == 0:
+                if self.pipeline.datamanager.ray_bundle_surface_detection and step % 1000 == 0:
                     output = self.pipeline.get_surface_detection(step, self.pipeline.datamanager.ray_bundle_surface_detection)
 
                     '''
@@ -376,22 +376,52 @@ class Trainer:
                     #    ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2])
 
                     # Plot the plane
-                    xx, yy = np.meshgrid(range(-3, 3), range(-3, 3))
+                    # xx, yy = np.meshgrid(range(-3, 3), range(-3, 3))
+                    xx, yy = np.meshgrid(range(-2, 2), range(-2, 2))
                     zz = (-a * xx - b * yy - d) / c
                     ax.plot_surface(xx, yy, zz, alpha=0.5)
 
                     
                     #print(vertices.shape) # 8 x 3
                     #TODO: plot the vertices
-                    # Plot the vertices
-                    for vertex in vertices:
-                        ax.scatter(*vertex)
+                    edges = {
+                        "x": [(0, 4), (1, 5), (2, 6), (3, 7)],
+                        "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
+                        "z": [(0, 1), (2, 3), (4, 5), (6, 7)]
+                    }
+                    # Plot the edges of the bbox
+                    for direction, edge_indices in edges.items():
+                        for i, j in edge_indices:
+                            # Get the starting and ending vertices for this edge
+                            starting_vertex = vertices[i]
+                            ending_vertex = vertices[j]
+                            # Plot the edge
+                            ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], [starting_vertex[2], ending_vertex[2]], color="red")
+                    
+                    # for vertex in vertices:
+                    #     ax.scatter(*vertex)
                     # Plot the bbox
                     
                     #plt.show()
             
                     # TODO: calculate the intersection of the obb and the plane to derive the NSA
-         
+                    print(f"Plane Equation: {a}x + {b}y + {c}z + {d} = 0")
+                    print(f"The object bbox vertices are: {vertices}")
+                    print(f"The object bbox directional vectors are: x:{self.pipeline.datamanager.dir_x}, y:{self.pipeline.datamanager.dir_y}, z:{self.pipeline.datamanager.dir_z}")
+
+                    bbox_intersections = self.derive_nsa(a, b, c, d, vertices, self.pipeline.datamanager.dir_x, self.pipeline.datamanager.dir_y, self.pipeline.datamanager.dir_z)
+                    # plot the intersections in the 3D plot
+                    for intersection in bbox_intersections:
+                        ax.scatter(*intersection)
+                    # save the 3D plot locally
+                    plot_dir = os.path.join(self.base_dir / self.config.logging.relative_log_dir, 'wandb/plots')
+                    if not os.path.exists(plot_dir):
+                        os.makedirs(plot_dir)
+                    plot_path = os.path.join(plot_dir, f"step-{step:09d}.png")
+                    plt.savefig(plot_path)
+                    # log the 3D plot at plot_path to wandb
+                    wandb.log({"3D Plot": wandb.Image(plot_path)})
+
                     #print(output_surface_detection) # depth / expected_depth / prop_depth_0 / prop_depth_1
 
                 # Do not perform evaluation if there are no validation images
@@ -426,6 +456,42 @@ class Trainer:
         if not self.config.viewer.quit_on_train_completion:
             self._train_complete_viewer()
 
+    def derive_nsa(self, a, b, c, d, vertices, x_dir, y_dir, z_dir):
+        # Initialize the list of intersections
+        intersections = []
+
+        # Define the edges
+        edges = {
+            "x": [(0, 4), (1, 5), (2, 6), (3, 7)],
+            "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
+            "z": [(0, 1), (2, 3), (4, 5), (6, 7)]
+        }
+
+        # Iterate over each edge
+        for direction, edge_indices in edges.items():
+            for i, j in edge_indices:
+                # Get the starting vertex and directional vector for this edge
+                starting_vertex = vertices[i]
+                if direction == "x":
+                    directional_vector = x_dir
+                elif direction == "y":
+                    directional_vector = y_dir
+                else:  # direction == "z"
+                    directional_vector = z_dir
+
+                # Solve for t
+                t = -(a * starting_vertex[0] + b * starting_vertex[1] + c * starting_vertex[2] + d) / (a * directional_vector[0] + b * directional_vector[1] + c * directional_vector[2])
+
+                # If t is in the range [0, 1], the edge intersects with the plane
+                if 0 <= t <= 1:
+                    # Calculate the 3D coordinate of the intersection point
+                    intersection = starting_vertex + t * directional_vector
+                    # Append the intersection to the list of intersections
+                    intersections.append(intersection)
+
+        # Return the list of intersections
+        return intersections
+    
     @check_main_thread
     def _check_viewer_warnings(self) -> None:
         """Helper to print out any warnings regarding the way the viewer/loggers are enabled"""
