@@ -64,6 +64,9 @@ from nerfstudio.utils.rich_utils import CONSOLE
 from nerfstudio.data.scene_box import OrientedBox
 import numpy as np
 from itertools import compress
+from nerfstudio.data.utils.data_utils import get_image_mask_tensor_from_path
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 @dataclass
 class ParallelDataManagerConfig(VanillaDataManagerConfig):
@@ -276,8 +279,10 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.dir_z = target_z # self.vertices: 0 -> 1, 2 -> 3, 4 -> 5, 6 -> 7
 
 
-        # TODO: initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) inside the scene_box (can be extracted from dataparser_outputs)
-        # where each vertex stores a boolean indicating objectness (whether it is inside the masked object)
+        # TODO: initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) in the range [-1, 1] on each axis
+        # where each vertex stores a boolean indicating object occupancy (whether it is inside the masked object, initialize with all True)
+        # self.object_occupancy = torch.ones((16, 16, 16), dtype=torch.bool)
+
         # add a new method "object_mask_from_2d_masks", where vertices are projected (using projection matrix derived from dataparser_outputs.cameras) 
         # to all 2D image planes to identify those falling into all 2D masks
         # can consider tricks such as coarse-to-fine or sorting the 2D mask areas
@@ -329,13 +334,126 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         #  [ 0.8727, -0.1656,  0.4594,  0.4534],
         #  [ 0.0773,  0.9757,  0.2049, -0.1915]]])
 
-        # raise NotImplementedError
+        # self.train_dataparser_outputs.mask_filenames:
+        # [PosixPath('/srv/beegfs02/scratch/data_shichen/data/nerfstudio/data/nerfstudio/lego_plenoxels/masks_2/frame_00001.png'),
+        #  PosixPath('/srv/beegfs02/scratch/data_shichen/data/nerfstudio/data/nerfstudio/lego_plenoxels/masks_2/frame_00002.png'),...]
+
+        self.object_occupancy = self.object_mask_from_2d_masks(resolution=16)
+        # plot object_occupancy inside a 3D grid of resolution 16, each axis in the range [-1, 1], where each vertex is colored according to object_occupancy. Save the plot as "object_occupancy.png"
+        self.plot_object_occupancy(self)
+
+        raise NotImplementedError
         
         # Spawn is critical for not freezing the program (PyTorch compatability issue)
         # check if spawn is already set
         if mp.get_start_method(allow_none=True) is None:
             mp.set_start_method("spawn")
         super().__init__()
+
+
+    # define a new method "object_mask_from_2d_masks" that:
+    # 1. initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) in the range [-1, 1] on each axis
+    # 2. project all vertices of "self.object_grid" to one of the 2D image planes (using projection matrix derived from dataparser_outputs.cameras) 
+    # 3. For those vertices projected outside the corresponding 2D mask (in our case, it means 1 or white), set the corresponding object_occupancy to False
+    # 4. project vertices where object_occupancy is True to another 2D image plane
+    # 5. repeat 3 and 4 for all 2D image planes
+    def object_mask_from_2d_masks(self, resolution=16):
+        print(f"Generating object mask of resolution = {resolution} from 2D masks...")
+        # 1. initialize a 3D grid "self.object_grid" with specified resolution (can start with coarser ones, e.g. 16) in the range [-1, 1] on each axis
+        grid = torch.linspace(-1, 1, resolution)
+        grid_x, grid_y, grid_z = torch.meshgrid(grid, grid, grid)
+        self.object_grid = torch.stack([grid_x, grid_y, grid_z], dim=-1)
+
+        # Initialize object occupancy grid
+        object_occupancy = torch.ones((resolution, resolution, resolution), dtype=bool)
+
+        # For each camera
+        for i in range(self.train_dataparser_outputs.cameras.camera_to_worlds.shape[0]):
+            print(f"Projecting to camera {i}...")
+            # 2. project only those vertices of "self.object_grid" for which "object_occupancy" is True
+            object_grid = self.object_grid[object_occupancy]
+
+            camera_to_world = self.train_dataparser_outputs.cameras.camera_to_worlds[i]
+            fx = self.train_dataparser_outputs.cameras.fx[i]
+            fy = self.train_dataparser_outputs.cameras.fy[i]
+            cx = self.train_dataparser_outputs.cameras.cx[i]
+            cy = self.train_dataparser_outputs.cameras.cy[i]
+            width = self.train_dataparser_outputs.cameras.width[i]
+            height = self.train_dataparser_outputs.cameras.height[i]
+
+            # Create projection matrix
+            projection_matrix = torch.zeros((3, 4))
+            projection_matrix[0, 0] = fx
+            projection_matrix[1, 1] = fy
+            projection_matrix[0, 2] = cx
+            projection_matrix[1, 2] = cy
+            projection_matrix[2, 2] = 1
+            camera_to_world = torch.cat([camera_to_world, torch.tensor([[0, 0, 0, 1]])], dim=0)
+            world_to_camera = torch.inverse(camera_to_world)
+            world_to_camera = world_to_camera[:-1, :]
+            projection_matrix = torch.matmul(projection_matrix, world_to_camera.T)
+
+            # Project vertices
+            projected_vertices = torch.matmul(object_grid, projection_matrix.T)
+            projected_vertices = projected_vertices[..., :2] / projected_vertices[..., 2:]
+
+            # 3. For those vertices projected outside the corresponding 2D mask (in our case, it means 1 or white), set the corresponding self.object_occupancy to False
+            mask_path = self.train_dataparser_outputs.mask_filenames[i]
+            mask = get_image_mask_tensor_from_path(mask_path)
+
+            # Convert projected_vertices to integer coordinates
+            projected_vertices_int = projected_vertices.long()
+
+            # Create a mask for vertices that are projected outside the image bounds
+            mask_outside = (projected_vertices[:, 0] < 0) | (projected_vertices[:, 0] >= width) | \
+                        (projected_vertices[:, 1] < 0) | (projected_vertices[:, 1] >= height)
+
+            # Clamp the coordinates to ensure they are within the image bounds
+            projected_vertices_int[:, 0].clamp_(torch.tensor(0).to(width.device), width - 1)
+            projected_vertices_int[:, 1].clamp_(torch.tensor(0).to(height.device), height - 1)
+            
+            # Create a mask for vertices that are inside the image mask
+            mask_img = mask[projected_vertices_int[:, 1], projected_vertices_int[:, 0]]  # True for outside, False for inside
+
+            # Use torch.where to set the mask to True for vertices that are projected outside the image bounds
+            mask_img = torch.where(mask_outside, torch.tensor(True), mask_img)
+
+            # Update object_occupancy
+            object_occupancy[object_occupancy.clone()] = ~mask_img
+
+        assert object_occupancy.sum() < resolution ** 3, "All points occupied!"
+        assert object_occupancy.sum() > 0, "No object points found in the scene! Try increasing the resolution."
+        return object_occupancy
+
+    def plot_object_occupancy(self):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Create a 3D grid
+        grid = torch.linspace(-1, 1, 16)
+        grid_x, grid_y, grid_z = torch.meshgrid(grid, grid, grid)
+
+        # Get the vertices where object_occupancy is True
+        occupied = self.object_occupancy
+        x = grid_x[occupied].numpy()
+        y = grid_y[occupied].numpy()
+        z = grid_z[occupied].numpy()
+
+        # Plot the vertices
+        ax.scatter(x, y, z, c='b')
+
+        # Get the vertices where object_occupancy is False
+        not_occupied = ~self.object_occupancy
+        x = grid_x[not_occupied].numpy()
+        y = grid_y[not_occupied].numpy()
+        z = grid_z[not_occupied].numpy()
+
+        # Plot the vertices
+        ax.scatter(x, y, z, c='r')
+
+        # Save the plot
+        plt.savefig("object_occupancy.png")
+        print("Saved object_occupancy.png")
 
     def create_train_dataset(self) -> TDataset:
         """Sets up the data loaders for training."""
