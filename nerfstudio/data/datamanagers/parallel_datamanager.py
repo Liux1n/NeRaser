@@ -243,9 +243,9 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         #         [ 0.1523,  0.2572,  0.0230]])
 
         # construct new aabb (now it's bbox of bbox)
-        new_min_point = torch.min(scaled_transformed_vertices, dim=0)[0]
-        new_max_point = torch.max(scaled_transformed_vertices, dim=0)[0]
-        self.object_aabb = torch.vstack([new_min_point, new_max_point])
+        # new_min_point = torch.min(scaled_transformed_vertices, dim=0)[0]
+        # new_max_point = torch.max(scaled_transformed_vertices, dim=0)[0]
+        # self.object_aabb = torch.vstack([new_min_point, new_max_point])
 
         # refined oriented box
         # another way to get R (Rodrigues)
@@ -333,10 +333,22 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.grid_resolution = 128 # 256 CUDA out of memory
         self.threshold = 0.9
         self.object_occupancy = self.object_mask_from_2d_masks(resolution=self.grid_resolution, threshold=self.threshold)
+        num_occupied_voxels = torch.sum(self.object_occupancy)
+        print(f"number of occupied voxels: {num_occupied_voxels}")
         # plot object_occupancy inside a 3D grid of resolution 16, each axis in the range [-1, 1], where each vertex is colored according to object_occupancy. Save the plot as "object_occupancy.png"
         # self.plot_object_occupancy(resolution=self.grid_resolution)
         # Optionally save object_occupancy for visualization
         np.save("object_occupancy.npy", self.object_occupancy.cpu().numpy())
+        print("Saved object_occupancy.npy")
+        
+        # get new self.object_aabb by finding the min and max points of the object_occupancy grid
+        self.occupied_coordinates = self.voxel_coords[:, self.object_occupancy]
+        print(f"self.occupied_coordinates.shape: {self.occupied_coordinates.shape}")
+        min_point = torch.min(self.occupied_coordinates, dim=1)[0]
+        max_point = torch.max(self.occupied_coordinates, dim=1)[0]
+        self.object_aabb = torch.vstack([min_point, max_point])
+        print(f"new self.object_aabb: {self.object_aabb}")
+        torch.cuda.empty_cache()
 
         # Spawn is critical for not freezing the program (PyTorch compatability issue)
         # check if spawn is already set
@@ -385,6 +397,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         voxel_cam_coords = torch.bmm(torch.inverse(c2w), voxel_world_coords)  # [batch, 4, N]
 
         # TODO: check if this is correct
+        # The shape would be wrong if we don't do this
+        # maybe we need to invert yz axis for plane sampling too
         # flip the z axis
         voxel_cam_coords[:, 2, :] = -voxel_cam_coords[:, 2, :]
         # flip the y axis
@@ -604,8 +618,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             input_dataset=self.eval_dataset,
             device=self.device,
             num_workers=self.world_size * 4,
-            # object_aabb=self.object_aabb, # new
-            object_obb=self.object_obb, # new
+            object_aabb=self.object_aabb, # new
+            # object_obb=self.object_obb, # new
         )
 
     def next_train(self, step: int) -> Tuple[RayBundle, Dict]:

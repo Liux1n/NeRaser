@@ -322,18 +322,22 @@ class Trainer:
                         x = self.pipeline.datamanager.ray_indices[i][2]
                         # xyz in camera coordinates
                         X = (x - cx) * depth / fx
-                        Y = (y - cy) * depth / fy
-                        Z = depth
+                        # Y = (y - cy) * depth / fy
+                        # Z = depth
+                        # invert the YZ axis
+                        Y = -(y - cy) * depth / fy
+                        Z = -depth
                         # Convert to world coordinates
                         camera_xyz = torch.stack([X, Y, Z, torch.ones_like(X)], dim=-1)
                         c2w = c2w.to(camera_xyz.device)
                         #world_xyz.append((c2w @ camera_xyz.T).T[..., :3])
-                        world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
+                        world_coordinates = (c2w @ camera_xyz.T).T[..., :3] # shape: (num_rays, 3)
                         # Transform the world coordinates
                         world_coordinates_homogeneous = torch.cat([world_coordinates, torch.ones(len(world_coordinates), 1)], dim=-1)
                         transformed_world_coordinates = (transform_matrix.to(world_coordinates_homogeneous.device) @ world_coordinates_homogeneous.T).T[..., :3]
                         scaled_transformed_world_coordinates = transformed_world_coordinates * scale_factor
-                        world_xyz.append(scaled_transformed_world_coordinates)
+                        # world_xyz.append(scaled_transformed_world_coordinates)
+                        world_xyz.append(world_coordinates)
                     
                     # calculate the plane equation using linear regression
                     # Flatten the world_xyz list and convert it to a numpy array
@@ -405,6 +409,7 @@ class Trainer:
                     #plt.show()
             
                     # TODO: calculate the intersection of the obb and the plane to derive the NSA
+                    print(f"The points used for the plane equation are: {world_xyz_np}")
                     print(f"Plane Equation: {a}x + {b}y + {c}z + {d} = 0")
                     print(f"The object bbox vertices are: {vertices}")
                     print(f"The object bbox directional vectors are: x:{self.pipeline.datamanager.dir_x}, y:{self.pipeline.datamanager.dir_y}, z:{self.pipeline.datamanager.dir_z}")
