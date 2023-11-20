@@ -164,8 +164,6 @@ def plane_estimation(config: TrainerConfig):
     num_image = len(pipeline.datamanager.expanded_cameras)
     assert num_image == len(output) , f"false length"
 
-    transform_matrix = pipeline.datamanager.transform_matrix
-    scale_factor = pipeline.datamanager.scale_factor
     world_xyz = []
     for i in range(num_image):
         
@@ -179,18 +177,16 @@ def plane_estimation(config: TrainerConfig):
         x = pipeline.datamanager.ray_indices[i][2]
         # xyz in camera coordinates
         X = (x - cx) * depth / fx
-        Y = (y - cy) * depth / fy
-        Z = depth
+        # Y = (y - cy) * depth / fy
+        # Z = depth
+        Y = -(y - cy) * depth / fy
+        Z = -depth
         # Convert to world coordinates
         camera_xyz = torch.stack([X, Y, Z, torch.ones_like(X)], dim=-1)
         c2w = c2w.to(camera_xyz.device)
         #world_xyz.append((c2w @ camera_xyz.T).T[..., :3])
         world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
-        # Transform the world coordinates
-        world_coordinates_homogeneous = torch.cat([world_coordinates, torch.ones(len(world_coordinates), 1)], dim=-1)
-        transformed_world_coordinates = (transform_matrix.to(world_coordinates_homogeneous.device) @ world_coordinates_homogeneous.T).T[..., :3]
-        scaled_transformed_world_coordinates = transformed_world_coordinates * scale_factor
-        world_xyz.append(scaled_transformed_world_coordinates)
+        world_xyz.append(world_coordinates)
     
     # calculate the plane equation using linear regression
     # Flatten the world_xyz list and convert it to a numpy array
@@ -206,11 +202,28 @@ def plane_estimation(config: TrainerConfig):
     d = reg.intercept_
     c = -1
 
-    vertices = pipeline.datamanager.vertices
-    print("Vertices of bbox\n")
-    print(vertices)
+    # vertices = pipeline.datamanager.vertices
+    # print("Vertices of bbox\n")
+    # print(vertices)
 
-    #uncomment this for visualization
+    # read aabb from occupancy grid as numpy on cpu
+    object_aabb = pipeline.datamanager.object_aabb.cpu().numpy()
+    min_point = object_aabb[0]
+    max_point = object_aabb[1]
+    # get the vertices of the aabb, in the order of     
+    # edges = {
+    #     "x": [(0, 4), (1, 5), (2, 6), (3, 7)],
+    #     "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
+    #     "z": [(0, 1), (2, 3), (4, 5), (6, 7)]
+    # }
+    vertices = np.array([[min_point[0], min_point[1], min_point[2]],
+                         [min_point[0], min_point[1], max_point[2]],
+                         [min_point[0], max_point[1], min_point[2]],
+                         [min_point[0], max_point[1], max_point[2]],
+                         [max_point[0], min_point[1], min_point[2]],
+                         [max_point[0], min_point[1], max_point[2]],
+                         [max_point[0], max_point[1], min_point[2]],
+                         [max_point[0], max_point[1], max_point[2]]])
     
     # Create a 3D plot
     fig = plt.figure()
@@ -226,10 +239,10 @@ def plane_estimation(config: TrainerConfig):
     zz = (-a * xx - b * yy - d) / c
     ax.plot_surface(xx, yy, zz, alpha=0.5)
 
-    # plot the reference plane
-    xx1, yy1 = np.meshgrid(range(-5, 5), range(-5, 5))
-    zz1 = (0.7365434765815735 * xx1 + 0.14943844079971313 * yy1 + 0.01226318534463644)/(-1)
-    ax.plot_surface(xx1, yy1, zz1, alpha=0.5, color = 'r')
+    # # plot the reference plane
+    # xx1, yy1 = np.meshgrid(range(-5, 5), range(-5, 5))
+    # zz1 = (0.7365434765815735 * xx1 + 0.14943844079971313 * yy1 + 0.01226318534463644)/(-1)
+    # ax.plot_surface(xx1, yy1, zz1, alpha=0.5, color = 'r')
 
     
     #print(vertices.shape) # 8 x 3
@@ -256,8 +269,19 @@ def plane_estimation(config: TrainerConfig):
     # plt.show()
     
     # The equation of the plane is `ax + by + cz + d = 0`
+    CONSOLE.print(f"The points used for the plane equation are: {world_xyz_np}")
     CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
     CONSOLE.print(f"The object bbox vertices are {vertices}")
+
+    # save the points for the plane equation as npy file
+    np.save('plane_samples.npy', world_xyz_np)
+    print("Saved the plane samples to plane_samples.npy")
+    # save the coefficients of the plane equation as npy file
+    np.save('plane_coefficients.npy', np.array([a, b, c, d]))
+    print("Saved the plane coefficients to plane_coefficients.npy")
+    # save the aabb as npy file
+    np.save('aabb.npy', object_aabb)
+    print("Saved the aabb to aabb.npy")
 
     bbox_intersections = derive_nsa(a, b, c, d, vertices)
     # plot the intersections in the 3D plot
