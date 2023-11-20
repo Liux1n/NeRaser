@@ -188,9 +188,10 @@ def plane_estimation(config: TrainerConfig):
         world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
         world_xyz.append(world_coordinates)
     
+    print(len(world_xyz))
     # calculate the plane equation using linear regression
     # Flatten the world_xyz list and convert it to a numpy array
-    world_xyz_np = np.concatenate([xyz.numpy() for xyz in world_xyz], axis=0)
+    world_xyz_np = np.concatenate([xyz.cpu().numpy() for xyz in world_xyz], axis=0)
     # Create a LinearRegression object
     reg = LinearRegression()
 

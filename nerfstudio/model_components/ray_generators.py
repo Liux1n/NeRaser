@@ -20,6 +20,8 @@ from torch import Tensor, nn
 
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.cameras.rays import RayBundle
+from typing import Optional
+import torch
 
 
 class RayGenerator(nn.Module):
@@ -49,6 +51,44 @@ class RayGenerator(nn.Module):
         x = ray_indices[:, 2]  # col indices
         coords = self.image_coords[y, x]
 
+        ray_bundle = self.cameras.generate_rays(
+            camera_indices=c.unsqueeze(-1),
+            coords=coords,
+        )
+        return ray_bundle
+    
+class RayGenerator_surface_detection(nn.Module):
+    """torch.nn Module for generating rays.
+    This class is the interface between the scene's cameras/camera optimizer and the ray sampler.
+
+    Args:
+        cameras: Camera objects containing camera info.
+        pose_optimizer: pose optimization module, for optimizing noisy camera intrinsics/extrinsics.
+    """
+
+    image_coords: Tensor
+
+    def __init__(self, cameras: Cameras) -> None:
+        super().__init__()
+        self.cameras = cameras
+        self.register_buffer("image_coords", cameras.get_image_coords(), persistent=False)
+
+    def forward(self, ray_indices: Int[Tensor, "num_rays 3"],  mask: Optional[torch.Tensor] = None) -> RayBundle:
+        # mask torch.bool
+        """Index into the cameras to generate the rays.
+
+        Args:
+            ray_indices: Contains camera, row, and col indices for target rays.
+        """
+        mask = mask
+
+        ray_indices = ray_indices[mask]
+        c = ray_indices[:, 0]  # camera indices
+        y = ray_indices[:, 1]  # row indices
+        x = ray_indices[:, 2]  # col indices
+        coords = self.image_coords[y, x]
+    
+        #print(mode_surface_detection)
         ray_bundle = self.cameras.generate_rays(
             camera_indices=c.unsqueeze(-1),
             coords=coords,

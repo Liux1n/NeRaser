@@ -57,7 +57,7 @@ from nerfstudio.data.utils.dataloaders import (
     FixedIndicesEvalDataloader,
     RandIndicesEvalDataloader,
 )
-from nerfstudio.model_components.ray_generators import RayGenerator
+from nerfstudio.model_components.ray_generators import RayGenerator, RayGenerator_surface_detection
 from nerfstudio.utils.rich_utils import CONSOLE
 
 # new
@@ -470,7 +470,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.eval_pixel_sampler = self._get_pixel_sampler(self.eval_dataset, self.config.eval_num_rays_per_batch)  # type: ignore
         self.eval_ray_generator = RayGenerator(self.eval_dataset.cameras.to(self.device))
 
-
+        '''
         #TODO: surface detection
 
         # generate ray for surface detection from evaluation dataset
@@ -541,6 +541,122 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
         # expand self.filtered_cameras to align with self.ray_indices
         self.expanded_cameras = [camera for camera in self.filtered_cameras for _ in range(3)]
+        '''
+
+        #TODO: surface detection
+
+        # generate ray for surface detection from evaluation dataset
+        
+        #self.surface_detection_dataset = self.eval_dataset
+        self.surface_detection_dataset = self.train_dataset
+
+
+        self.mask = [item for item in self.surface_detection_dataset] 
+        self.surface_detection_pixel_sampler = self._get_pixel_sampler(self.surface_detection_dataset, self.config.eval_num_rays_per_batch)
+        
+        #print(self.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
+        # white is 1, black is 0
+        y_outbound = self.mask[0]['mask'].shape[0] # 764
+
+        for i, item in enumerate(self.mask):
+            mask_array = item['mask'].numpy().squeeze()
+            y, x = np.where(mask_array == 0)
+            max_y = np.max(y)
+            #max_x = np.max(x)
+            #min_x = np.min(x)
+            #width = max_x - min_x
+            bottom_pixel = (max_y, x[np.argmax(y)]) # findv the bottom pixel of the mask
+            y_lower = bottom_pixel[0] - 5  # Subtract 5 from the y-coordinate of bottom_pixel
+             # Find the x-coordinate at this new y-coordinate
+
+            above_bottom_pixel = (y_lower, bottom_pixel[1])
+     
+            # Find the indices where y is between y_up_bottom and y_bottom
+            indices = np.where((y >= above_bottom_pixel[0]) & (y <= bottom_pixel[0]))
+
+            # Extract the corresponding x values
+            x_values = x[indices]
+
+            # Compute the width as the difference between the maximum and minimum x values
+            width = np.max(x_values) - np.min(x_values)
+            #TODO: find the width of the area between y_bottom and y_up_bottom  
+            self.mask[i]['bottom_pixel'] = bottom_pixel
+            #print(bottom_pixel)
+            #self.mask[i]['y_up_bottom'] = y_up_bottom
+            self.mask[i]['width'] = width
+            #self.mask[i]['width'] = 2
+            
+        
+        
+        y_sample_range = 25
+        num_samples = 30
+
+        # filter out out-of-bound indices
+        self.surface_detection_camera = self.surface_detection_dataset.cameras
+
+        # Initialize an empty numpy array
+        all_points_np = np.empty((0, 3))        
+        
+        camera_list = []
+        image_list = []
+
+        for i, item in enumerate(self.mask):
+
+            idx = item['image_idx']
+            bottom_y = int(item['bottom_pixel'][0])
+            bottom_x = int(item['bottom_pixel'][1])
+            width = int(item['width'])
+            camera = self.surface_detection_camera[idx]
+            image = self.surface_detection_dataset[idx]
+            # Append the camera to the camera_list
+            camera_list.append([camera] * num_samples)
+            image_list.append([image] * num_samples)
+            # Generate an idx array of the same length as points
+            idx_array = np.full((num_samples, 1), idx)
+            # Generate random x coordinates within the width
+            x_samples = np.random.randint(low= bottom_x - width/2, high= bottom_x + width/2, size=num_samples)
+
+            # Generate random y coordinates between y_up_bottom and y_bottom
+            y_samples = np.random.randint(low=bottom_y + y_sample_range -10, high=bottom_y + y_sample_range, size=num_samples)
+            
+
+            # Combine the idx, x and y coordinates into a 2D array
+            points = np.column_stack((idx_array, x_samples, y_samples))
+            #print(points.shape)
+            # Concatenate the points to all_points_np
+            all_points_np = np.concatenate((all_points_np, points), axis=0)
+            #print(all_points_np.shape)
+        # Flatten the camera_list
+        camera_list = [camera for sublist in camera_list for camera in sublist]
+        image_list = [image for sublist in image_list for image in sublist]
+        
+        #print(all_points_np)
+        #raise NotImplementedError
+        
+
+        self.ray_indices = torch.from_numpy(all_points_np).int()
+        mask = self.ray_indices[:, 1] + y_sample_range < y_outbound
+
+        #print(self.ray_indices)
+        #mask = self.ray_indices[:, :1] + y_sample_range < y_outbound
+
+        camera_list = list(compress(camera_list, mask))
+
+        camera_list = [camera.to(self.device) for camera in camera_list]
+        image_list = list(compress(image_list, mask))
+
+        self.surface_detection_ray_generator = RayGenerator_surface_detection(self.train_dataset.cameras.to(self.device))
+
+        # create ray bundle from ray indices
+        self.ray_bundle_surface_detection = self.surface_detection_ray_generator(self.ray_indices, mask = mask)
+
+        # expand self.filtered_cameras to align with self.ray_indices
+        #self.expanded_cameras = [camera for camera in self.filtered_cameras for _ in range(num_samples)]
+        self.expanded_cameras = camera_list
+        self.filtered_data = image_list
+        #print(self.ray_indices.shape, len(self.expanded_cameras))
+        #print(self.ray_indices.shape, len(camera_list))
+
 
 
 
