@@ -425,7 +425,7 @@ class Trainer:
                     plot_path = os.path.join(plot_dir, f"step-{step:09d}.png")
                     plt.savefig(plot_path)
                     # log the 3D plot at plot_path to wandb
-                    wandb.log({"3D Plot": wandb.Image(plot_path)})
+                    # wandb.log({"3D Plot": wandb.Image(plot_path)})
 
                     #print(output_surface_detection) # depth / expected_depth / prop_depth_0 / prop_depth_1
 
