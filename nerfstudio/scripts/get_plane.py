@@ -221,7 +221,8 @@ def plane_estimation(config: TrainerConfig):
     #    ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2])
 
     # Plot the plane
-    xx, yy = np.meshgrid(range(-5, 5), range(-5, 5))
+    # xx, yy = np.meshgrid(range(-5, 5), range(-5, 5))
+    xx, yy = np.meshgrid(range(-2, 2), range(-2, 2))
     zz = (-a * xx - b * yy - d) / c
     ax.plot_surface(xx, yy, zz, alpha=0.5)
 
@@ -234,15 +235,82 @@ def plane_estimation(config: TrainerConfig):
     #print(vertices.shape) # 8 x 3
     #TODO: plot the vertices
     # Plot the vertices
-    for vertex in vertices:
-        ax.scatter(*vertex)
+    # for vertex in vertices:
+    #     ax.scatter(*vertex)
 
     # Plot the bbox
-    
-    plt.show()
+    edges = {
+        "x": [(0, 4), (1, 5), (2, 6), (3, 7)],
+        "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
+        "z": [(0, 1), (2, 3), (4, 5), (6, 7)]
+    }
+    # Plot the edges of the bbox
+    for direction, edge_indices in edges.items():
+        for i, j in edge_indices:
+            # Get the starting and ending vertices for this edge
+            starting_vertex = vertices[i]
+            ending_vertex = vertices[j]
+            # Plot the edge
+            ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], [starting_vertex[2], ending_vertex[2]], color="red")    
+
+    # plt.show()
     
     # The equation of the plane is `ax + by + cz + d = 0`
     CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
+    CONSOLE.print(f"The object bbox vertices are {vertices}")
+
+    bbox_intersections = derive_nsa(a, b, c, d, vertices)
+    # plot the intersections in the 3D plot
+    for intersection in bbox_intersections:
+        ax.scatter(*intersection, color="green")
+    # save the 3D plot locally
+    config.set_timestamp()
+    plot_dir = os.path.join(config.get_base_dir() / config.logging.relative_log_dir, 'wandb/plots')
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    plot_path = os.path.join(plot_dir, f"nsa_plot.png")
+    plt.savefig(plot_path)
+    CONSOLE.print(f"Saved the NSA plot to {plot_path}")
+
+
+
+def derive_nsa(a, b, c, d, vertices):
+    # Initialize the list of intersections
+    intersections = []
+
+    # Define the edges
+    edges = {
+        "x": [(0, 4), (1, 5), (2, 6), (3, 7)],
+        "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
+        "z": [(0, 1), (2, 3), (4, 5), (6, 7)]
+    }
+
+    # Iterate over each edge
+    for direction, edge_indices in edges.items():
+        if direction == "x":
+            directional_vector = vertices[4] - vertices[0]
+        elif direction == "y":
+            directional_vector = vertices[2] - vertices[0]
+        else:  # direction == "z"
+            directional_vector = vertices[1] - vertices[0]
+
+        for i, j in edge_indices:
+            # Get the starting vertex and directional vector for this edge
+            starting_vertex = vertices[i]
+
+            # Solve for t
+            t = -(a * starting_vertex[0] + b * starting_vertex[1] + c * starting_vertex[2] + d) / (a * directional_vector[0] + b * directional_vector[1] + c * directional_vector[2])
+
+            # If t is in the range [0, 1], the edge intersects with the plane
+            if 0 <= t <= 1:
+                # Calculate the 3D coordinate of the intersection point
+                intersection = starting_vertex + t * directional_vector
+                # Append the intersection to the list of intersections
+                intersections.append(intersection)
+
+    # Return the list of intersections
+    return intersections
+
 def main(config: TrainerConfig) -> None:
     """Main function."""
     # config, pipeline, checkpoint_path, _ = eval_setup(self.load_config)
