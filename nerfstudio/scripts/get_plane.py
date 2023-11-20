@@ -36,7 +36,6 @@ from nerfstudio.configs.method_configs import AnnotatedBaseConfigUnion
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.utils import comms, profiler
 from nerfstudio.utils.rich_utils import CONSOLE
-from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 import dataclasses
 import functools
@@ -64,7 +63,7 @@ from rich import box, style
 from rich.panel import Panel
 from rich.table import Table
 from torch.cuda.amp.grad_scaler import GradScaler
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression,TheilSenRegressor, HuberRegressor
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -193,7 +192,8 @@ def plane_estimation(config: TrainerConfig):
     # Flatten the world_xyz list and convert it to a numpy array
     world_xyz_np = np.concatenate([xyz.cpu().numpy() for xyz in world_xyz], axis=0)
     # Create a LinearRegression object
-    reg = LinearRegression()
+    #reg = LinearRegression()
+    reg = TheilSenRegressor(random_state=0)
 
     # Fit the model to the data
     reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2])

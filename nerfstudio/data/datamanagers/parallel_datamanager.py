@@ -588,8 +588,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             
         
         
-        y_sample_range = 25
-        num_samples = 30
+        y_sample_range = 60
+        num_samples = 50
 
         # filter out out-of-bound indices
         self.surface_detection_camera = self.surface_detection_dataset.cameras
