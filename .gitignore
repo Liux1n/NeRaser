@@ -193,3 +193,4 @@ slurm_logs/
 NeRaser/
 my_scripts/
 nsa_identification.py
+object_occupancy.*
