@@ -307,8 +307,8 @@ class Trainer:
                     print(num_image, len(output))
                     assert num_image == len(output) , f"false length"
 
-                    transform_matrix = self.pipeline.datamanager.transform_matrix
-                    scale_factor = self.pipeline.datamanager.scale_factor
+                    #transform_matrix = self.pipeline.datamanager.transform_matrix
+                    #scale_factor = self.pipeline.datamanager.scale_factor
                     world_xyz = []
                     for i in range(num_image):
                      
@@ -350,7 +350,7 @@ class Trainer:
                     # The equation of the plane is `ax + by + cz + d = 0`
                     #CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
 
-                    vertices = self.pipeline.datamanager.vertices
+                    #vertices = self.pipeline.datamanager.vertices
 
                     #calculate difference between planes over steps
 
@@ -382,8 +382,8 @@ class Trainer:
                     #print(vertices.shape) # 8 x 3
                     #TODO: plot the vertices
                     # Plot the vertices
-                    for vertex in vertices:
-                        ax.scatter(*vertex)
+                    #for vertex in vertices:
+                    #    ax.scatter(*vertex)
                     # Plot the bbox
                     
                     #plt.show()

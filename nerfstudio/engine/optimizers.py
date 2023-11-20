@@ -176,8 +176,8 @@ class Optimizers:
         Args:
             loaded_state: the state from the previous checkpoint
         """
-        for k, v in loaded_state.items():
-            self.optimizers[k].load_state_dict(v)
+        #for k, v in loaded_state.items():
+        #    self.optimizers[k].load_state_dict(v)
 
     def load_schedulers(self, loaded_state: Dict[str, Any]) -> None:
         """Helper to load the scheduler state from previous checkpoint

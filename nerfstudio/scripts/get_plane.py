@@ -264,7 +264,8 @@ def plane_estimation(config: TrainerConfig):
             starting_vertex = vertices[i]
             ending_vertex = vertices[j]
             # Plot the edge
-            ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], [starting_vertex[2], ending_vertex[2]], color="red")    
+            ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], 
+                    [starting_vertex[2], ending_vertex[2]], color="red")    
 
     # plt.show()
     
