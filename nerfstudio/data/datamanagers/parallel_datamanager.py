@@ -271,6 +271,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         #  [ 0.0773,  0.9757,  0.2049, -0.1915]]])
 
         # Getting Object Occupancy Grid
+        print("hello\n")
+        print("------------->\n")
         self.grid_resolution = 128 # 256 CUDA out of memory
         self.threshold = 0.9
         self.object_occupancy = self.object_mask_from_2d_masks(resolution=self.grid_resolution, threshold=self.threshold)        

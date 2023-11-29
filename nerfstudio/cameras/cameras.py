@@ -27,6 +27,7 @@ import torchvision
 from jaxtyping import Float, Int, Shaped
 from torch import Tensor
 from torch.nn import Parameter
+import numpy as np
 
 import nerfstudio.utils.math
 import nerfstudio.utils.poses as pose_utils
@@ -526,7 +527,16 @@ class Cameras(TensorDataclass):
 
                 t_max = t_max.reshape([-1, 1])
 
+
+                # calculate the plane intersection, replace the t_max if intersection on the plane satisfactory
+                plane_coefficients = np.load('plane_coefficients.npy')
+                t_plane = nerfstudio.utils.math.intersect_plane(plane_coefficients,rays_o, rays_d)
+                mask = (t_plane < t_max) & (t_plane > 1e-2)
+                t_max[mask] = t_plane[mask]
+
+
                 raybundle.nears = t_max
+
                 raybundle.fars = 1000 * torch.ones_like(raybundle.nears)
         # print(f"NEARS[0,0]: {raybundle.nears[0,0]}, \n")
         # print(f"FARS[0,0]: {raybundle.fars[0,0]}\n")

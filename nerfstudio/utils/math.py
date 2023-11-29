@@ -278,7 +278,7 @@ def intersect_obb(
 
     Args:
         origins: [N,3] tensor of 3d positions
-        directions: [N,3] tensor of normalized directions
+        directions: [N,3] tensor of normalized directionsval_image
         R: [3,3] rotation matrix
         T: [3] translation vector
         S: [3] extents of the bounding box
@@ -301,28 +301,23 @@ def intersect_obb(
 
     return t_min, t_max
 
-# # added by cs
-# def intersect_oriented_objectbox(
-#     origins: torch.Tensor,
-#     directions: torch.Tensor,
-#     obb: OrientedBox,
-#     max_bound: float = 1e10,
-# ):
-#     # Transform ray to OBB space
-#     R, T, S = obb.R, obb.T, obb.S.to(origins.device)
-#     H = torch.eye(4, device=origins.device, dtype=origins.dtype)
-#     H[:3, :3] = R
-#     H[:3, 3] = T
-#     H_world2bbox = torch.inverse(H)
-#     origins = torch.cat((origins, torch.ones_like(origins[..., :1])), dim=-1)
-#     origins = torch.matmul(H_world2bbox, origins.T).T[..., :3]
-#     directions = torch.matmul(H_world2bbox[:3, :3], directions.T).T
 
-#     # Compute intersection with axis-aligned bounding box with min as -S and max as +S
-#     aabb = torch.concat((-S / 2, S / 2))
-#     t_min, t_max = intersect_objectbox(origins, directions, aabb, max_bound=max_bound)
 
-#     return t_min, t_max
+def intersect_plane(
+    plane_coefficients,     
+    origins: torch.Tensor,
+    directions: torch.Tensor,
+):
+    a = plane_coefficients[0]
+    b = plane_coefficients[1]
+    c = plane_coefficients[2]
+    d = plane_coefficients[3]
+    normal = torch.Tensor([a,b,c])
+    normal = safe_normalize(normal)     #get plane normal
+    point = torch.Tensor([0,0,-d/c])
+    t = torch.inner((point - origins),normal)/torch.inner(directions,normal)
+    return t
+
 
 def safe_normalize(
     vectors: Float[Tensor, "*batch_dim N"],
