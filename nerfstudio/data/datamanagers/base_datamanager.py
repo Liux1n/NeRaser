@@ -66,10 +66,20 @@ from nerfstudio.data.utils.dataloaders import (
 )
 from nerfstudio.data.utils.nerfstudio_collate import nerfstudio_collate
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes
-from nerfstudio.model_components.ray_generators import RayGenerator
+from nerfstudio.model_components.ray_generators import RayGenerator, RayGenerator_surface_detection
 from nerfstudio.utils.misc import IterableWrapper
 from nerfstudio.utils.rich_utils import CONSOLE
 from nerfstudio.utils.misc import get_orig_class
+
+# new
+from nerfstudio.data.scene_box import OrientedBox
+import numpy as np
+from itertools import compress
+from nerfstudio.data.utils.data_utils import get_image_mask_tensor_from_path
+import matplotlib.pyplot as plt
+import os
+import torch.nn.functional as F
+import time
 
 
 def variable_res_collate(batch: List[Dict]) -> Dict:
@@ -412,6 +422,34 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         self.train_dataset = self.create_train_dataset()
         self.eval_dataset = self.create_eval_dataset()
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
+
+
+        #surface detection
+        # Getting Object Occupancy Grid
+        self.grid_resolution = 128 # 256 CUDA out of memory
+        self.threshold = 0.9
+        self.object_occupancy = self.object_mask_from_2d_masks(resolution=self.grid_resolution, threshold=self.threshold)        
+        num_occupied_voxels = torch.sum(self.object_occupancy)
+        print(f"number of occupied voxels: {num_occupied_voxels}")
+
+        # Optionally save object_occupancy for visualization
+        np.save("object_occupancy.npy", self.object_occupancy.cpu().numpy())
+        print("Saved object_occupancy.npy")
+
+        # get new self.object_aabb by finding the min and max points of the object_occupancy grid
+        self.occupied_coordinates = self.voxel_coords[:, self.object_occupancy]
+        # print(f"self.occupied_coordinates.shape: {self.occupied_coordinates.shape}")
+        min_point = torch.min(self.occupied_coordinates, dim=1)[0]
+        max_point = torch.max(self.occupied_coordinates, dim=1)[0]
+        self.object_aabb = torch.vstack([min_point, max_point])
+        print(f"self.object_aabb derived from occupancy grid: {self.object_aabb}")
+        torch.cuda.empty_cache()
+
+
+
+
+
+
         if self.config.masks_on_gpu is True:
             self.exclude_batch_keys_from_device.remove("mask")
         if self.config.images_on_gpu is True:
@@ -457,6 +495,87 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
                     if issubclass(value, InputDataset):
                         return cast(Type[TDataset], value)
         return default
+    
+
+    def object_mask_from_2d_masks(self, resolution=16, threshold=1):
+        start_time = time.time()
+        # 1. Initialize a 3D grid
+        print(f"Initializing a 3D grid with resolution {resolution}...")
+        self.voxel_coords = self.initialize_grid(resolution, self.train_dataparser_outputs.scene_box.aabb)
+
+        # camera extrinsics and intrinsics
+        cameras = self.train_dataparser_outputs.cameras
+        c2w = cameras.camera_to_worlds.to(self.device)
+        # make c2w homogeneous
+        c2w = torch.cat([c2w, torch.zeros(c2w.shape[0], 1, 4, device=self.device)], dim=1)
+        c2w[:, 3, 3] = 1
+        K = cameras.get_intrinsics_matrices().to(self.device)
+
+        # mask images
+        mask_paths = self.train_dataparser_outputs.mask_filenames
+        mask_images = []
+        for mask_path in mask_paths:
+            mask_tensor = get_image_mask_tensor_from_path(mask_path)
+            mask_images.append(mask_tensor)
+        mask_images = torch.stack(mask_images, dim=0).to(self.device).permute(0, 3, 1, 2) # shape (N, 1, H, W)
+
+        # 2. Project all vertices of the grid to all 2D image planes
+        batch_size = c2w.shape[0]
+        image_size = torch.tensor([mask_images.shape[-1], mask_images.shape[-2]], device=self.device)  # [width, height]
+        print(f"Projecting all vertices of the grid to all {batch_size} 2D image planes...")
+
+        # make voxel_coords homogeneous
+        voxel_world_coords = self.voxel_coords.view(3, -1)
+        voxel_world_coords = torch.cat([voxel_world_coords, torch.ones(1, voxel_world_coords.shape[1], device=self.device)], dim=0)
+        voxel_world_coords = voxel_world_coords.unsqueeze(0)  # [1, 4, N]
+        voxel_world_coords = voxel_world_coords.expand(batch_size, *voxel_world_coords.shape[1:])  # [batch, 4, N]
+        voxel_cam_coords = torch.bmm(torch.inverse(c2w), voxel_world_coords)  # [batch, 4, N]
+
+        # TODO: check if this is correct
+        # flip the z axis
+        voxel_cam_coords[:, 2, :] = -voxel_cam_coords[:, 2, :]
+        # flip the y axis
+        voxel_cam_coords[:, 1, :] = -voxel_cam_coords[:, 1, :]
+
+        voxel_cam_coords_z = voxel_cam_coords[:, 2:3, :]
+        voxel_cam_points = torch.bmm(K, voxel_cam_coords[:, 0:3, :] / voxel_cam_coords_z)  # [batch, 3, N]
+        voxel_pixel_coords = voxel_cam_points[:, :2, :]  # [batch, 2, N]
+
+        # 3. Sample the corresponding 2D masks at the projected points
+        print("Sampling the corresponding 2D masks at the projected points...")
+        grid = voxel_pixel_coords.permute(0, 2, 1)  # [batch, N, 2]
+        # normalize grid to [-1, 1]
+        grid = 2.0 * grid / image_size.view(1, 1, 2) - 1.0  # [batch, N, 2]
+        grid = grid[:, None]  # [batch, 1, N, 2]
+        # sample masks
+        sampled_masks = F.grid_sample(input=mask_images.float(), grid=grid, mode="nearest", padding_mode="border", align_corners=False) # [batch, 1, 1, N]
+
+        # 4. Define a new tensor storing the proportion of the projected points that fall in the "False" area of the 2D mask
+        self.objectness_grid = self.calculate_objectness(sampled_masks, resolution)
+
+        # 5. Return a boolean tensor where each vertex is True if the corresponding vertex in the objectness grid is higher than a specified threshold
+        object_occupancy = self.objectness_grid >= threshold
+
+        end_time = time.time()
+        print(f"Time elapsed: {end_time - start_time} seconds.")
+        return object_occupancy
+
+    def initialize_grid(self, resolution, aabb):
+        # Initialize a 3D grid with the specified resolution and bounding box
+        origin = aabb[0]
+        voxel_size = (aabb[1] - aabb[0]) / resolution
+        xdim = torch.arange(resolution)
+        ydim = torch.arange(resolution)
+        zdim = torch.arange(resolution)
+        grid = torch.stack(torch.meshgrid([xdim, ydim, zdim], indexing="ij"), dim=0)
+        voxel_coords = origin.view(3, 1, 1, 1) + grid * voxel_size.view(3, 1, 1, 1)
+        return voxel_coords.to(self.device)
+
+    def calculate_objectness(self, sampled_masks, resolution):
+        # Define a new tensor storing the proportion of the projected points that fall in the "False" area of the 2D mask
+        objectness = (sampled_masks == 0).float().mean(dim=0)
+        return objectness.view(resolution, resolution, resolution)
+
 
     def create_train_dataset(self) -> TDataset:
         """Sets up the data loaders for training"""
@@ -520,6 +639,127 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         self.iter_eval_image_dataloader = iter(self.eval_image_dataloader)
         self.eval_pixel_sampler = self._get_pixel_sampler(self.eval_dataset, self.config.eval_num_rays_per_batch)
         self.eval_ray_generator = RayGenerator(self.eval_dataset.cameras.to(self.device))
+
+
+
+
+        # generate ray for surface detection from evaluation dataset
+        
+        #self.surface_detection_dataset = self.eval_dataset
+        self.surface_detection_dataset = self.train_dataset
+
+
+        self.mask = [item for item in self.surface_detection_dataset] 
+        self.surface_detection_pixel_sampler = self._get_pixel_sampler(self.surface_detection_dataset, self.config.eval_num_rays_per_batch)
+        
+        #print(self.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
+        # white is 1, black is 0
+        y_outbound = self.mask[0]['mask'].shape[0] # 764
+
+        for i, item in enumerate(self.mask):
+            mask_array = item['mask'].numpy().squeeze()
+            y, x = np.where(mask_array == 0)
+            max_y = np.max(y)
+            #max_x = np.max(x)
+            #min_x = np.min(x)
+            #width = max_x - min_x
+            bottom_pixel = (max_y, x[np.argmax(y)]) # findv the bottom pixel of the mask
+            y_lower = bottom_pixel[0] - 5  # Subtract 5 from the y-coordinate of bottom_pixel
+             # Find the x-coordinate at this new y-coordinate
+
+            above_bottom_pixel = (y_lower, bottom_pixel[1])
+     
+            # Find the indices where y is between y_up_bottom and y_bottom
+            indices = np.where((y >= above_bottom_pixel[0]) & (y <= bottom_pixel[0]))
+
+            # Extract the corresponding x values
+            x_values = x[indices]
+
+            # Compute the width as the difference between the maximum and minimum x values
+            width = np.max(x_values) - np.min(x_values)
+            #TODO: find the width of the area between y_bottom and y_up_bottom  
+            self.mask[i]['bottom_pixel'] = bottom_pixel
+            #print(bottom_pixel)
+            #self.mask[i]['y_up_bottom'] = y_up_bottom
+            self.mask[i]['width'] = width
+            #self.mask[i]['width'] = 2
+            
+        
+        
+        y_sample_range = 60
+        num_samples = 50
+
+        # filter out out-of-bound indices
+        self.surface_detection_camera = self.surface_detection_dataset.cameras
+
+        # Initialize an empty numpy array
+        all_points_np = np.empty((0, 3))        
+        
+        camera_list = []
+        image_list = []
+
+        for i, item in enumerate(self.mask):
+
+            idx = item['image_idx']
+            bottom_y = int(item['bottom_pixel'][0])
+            bottom_x = int(item['bottom_pixel'][1])
+            width = int(item['width'])
+            camera = self.surface_detection_camera[idx]
+            image = self.surface_detection_dataset[idx]
+            # Append the camera to the camera_list
+            camera_list.append([camera] * num_samples)
+            image_list.append([image] * num_samples)
+            # Generate an idx array of the same length as points
+            idx_array = np.full((num_samples, 1), idx)
+            # Generate random x coordinates within the width
+            x_samples = np.random.randint(low= bottom_x - width/2, high= bottom_x + width/2, size=num_samples)
+
+            # Generate random y coordinates between y_up_bottom and y_bottom
+            y_samples = np.random.randint(low=bottom_y + y_sample_range -10, high=bottom_y + y_sample_range, size=num_samples)
+            
+
+            # Combine the idx, x and y coordinates into a 2D array
+            points = np.column_stack((idx_array, x_samples, y_samples))
+            #print(points.shape)
+            # Concatenate the points to all_points_np
+            all_points_np = np.concatenate((all_points_np, points), axis=0)
+            #print(all_points_np.shape)
+        # Flatten the camera_list
+        camera_list = [camera for sublist in camera_list for camera in sublist]
+        image_list = [image for sublist in image_list for image in sublist]
+        
+        #print(all_points_np)
+        #raise NotImplementedError
+        
+
+        self.ray_indices = torch.from_numpy(all_points_np).int()
+        mask = self.ray_indices[:, 1] + y_sample_range < y_outbound
+
+        #print(self.ray_indices)
+        #mask = self.ray_indices[:, :1] + y_sample_range < y_outbound
+
+        camera_list = list(compress(camera_list, mask))
+
+        camera_list = [camera.to(self.device) for camera in camera_list]
+        image_list = list(compress(image_list, mask))
+
+        self.surface_detection_ray_generator = RayGenerator_surface_detection(self.train_dataset.cameras.to(self.device))
+
+        # create ray bundle from ray indices
+        self.ray_bundle_surface_detection = self.surface_detection_ray_generator(self.ray_indices, mask = mask)
+
+        # expand self.filtered_cameras to align with self.ray_indices
+        #self.expanded_cameras = [camera for camera in self.filtered_cameras for _ in range(num_samples)]
+        self.expanded_cameras = camera_list
+        self.filtered_data = image_list
+
+
+
+
+
+
+
+
         # for loading full images
         self.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
             input_dataset=self.eval_dataset,

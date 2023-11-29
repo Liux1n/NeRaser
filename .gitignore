@@ -197,3 +197,4 @@ object_occupancy.*
 
 # add by liuxin
 occupancy.ipynb
+*.npy
