@@ -51,6 +51,9 @@ from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import profiler
 from nerfstudio.cameras.rays import RayBundle
 
+# for debugging
+import numpy as np
+
 def module_wrapper(ddp_or_model: Union[DDP, Model]) -> Model:
     """
     If DDP, then return the .module. Otherwise, return the model.
@@ -360,11 +363,10 @@ class VanillaPipeline(Pipeline):
     
     #new function
     @profiler.time_function
-    def get_surface_detection(self, step: int, ray_bundle: RayBundle) -> Tuple[Any]:
+    def get_surface_detection(self, ray_bundle: RayBundle) -> Tuple[Any]:
         """This function gets the results of surface detection.
 
         Args:
-            step: current iteration step
             ray_bundle: ray bundle to pass to model
         """
         self.eval()
@@ -372,6 +374,13 @@ class VanillaPipeline(Pipeline):
         with torch.no_grad():
             model_outputs = self.model(ray_bundle) # depth / expected_depth / prop_depth_0 / prop_depth_1
             depth = model_outputs["depth"]
+            # depth = model_outputs["expected_depth"]
+
+            # also sample the corresponding color
+            color = model_outputs["rgb"] 
+            # print(f"depth.shape: {depth.shape}")
+            # print(f"color.shape: {color.shape}")
+            
         
         '''
         RayBundle(origins=tensor([0.2350, 0.7207, 0.0918], device='cuda:0'), directions=tensor([-0.5048, -0.4801, -0.7174], device='cuda:0'), pixel_area=tensor([1.4408e-06], device='cuda:0'), camera_indices=tensor([0], device='cuda:0'), nears=None, fars=None, metadata={'directions_norm': tensor([1.0684], device='cuda:0')}, times=None)
@@ -382,7 +391,7 @@ class VanillaPipeline(Pipeline):
         '''
 
         self.train()
-        return depth
+        return depth, color
 
 
     @profiler.time_function

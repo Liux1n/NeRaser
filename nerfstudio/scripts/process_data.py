@@ -136,7 +136,8 @@ class ProcessPolycam(BaseConverterToNerfstudioDataset):
     """Minimum blur score to use an image. If the blur score is below this value, the image will be skipped."""
     crop_border_pixels: int = 15
     """Number of pixels to crop from each border of the image. Useful as borders may be black due to undistortion."""
-    use_depth: bool = False
+    # use_depth: bool = False
+    use_depth: bool = True
     """If True, processes the generated depth maps from Polycam"""
 
     def main(self) -> None:

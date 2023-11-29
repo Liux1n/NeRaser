@@ -277,9 +277,9 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         num_occupied_voxels = torch.sum(self.object_occupancy)
         print(f"number of occupied voxels: {num_occupied_voxels}")
 
-        # Optionally save object_occupancy for visualization
-        np.save("object_occupancy.npy", self.object_occupancy.cpu().numpy())
-        print("Saved object_occupancy.npy")
+        # # Optionally save object_occupancy for visualization
+        # np.save("object_occupancy.npy", self.object_occupancy.cpu().numpy())
+        # print("Saved object_occupancy.npy")
 
         # get new self.object_aabb by finding the min and max points of the object_occupancy grid
         self.occupied_coordinates = self.voxel_coords[:, self.object_occupancy]

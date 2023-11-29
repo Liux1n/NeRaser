@@ -294,7 +294,7 @@ class Trainer:
                 t = 0
                 # if self.pipeline.datamanager.ray_bundle_surface_detection and step == 20*offset:
                 if self.pipeline.datamanager.ray_bundle_surface_detection and step % 20 == 0:
-                    output = self.pipeline.get_surface_detection(step, self.pipeline.datamanager.ray_bundle_surface_detection)
+                    output, color = self.pipeline.get_surface_detection(step, self.pipeline.datamanager.ray_bundle_surface_detection)
 
                     '''
                     RayBundle(origins=tensor([0.2350, 0.7207, 0.0918], device='cuda:0'), directions=tensor([-0.5048, -0.4801, -0.7174], device='cuda:0'), pixel_area=tensor([1.4408e-06], device='cuda:0'), camera_indices=tensor([0], device='cuda:0'), nears=None, fars=None, metadata={'directions_norm': tensor([1.0684], device='cuda:0')}, times=None)
