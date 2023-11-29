@@ -334,6 +334,7 @@ def plane_estimation(config: TrainerConfig):
     # plot the intersections in the 3D plot
     for intersection in bbox_intersections:
         ax.scatter(*intersection, color="green")
+    print(f"bbox_intersections: {bbox_intersections}")
     # save the 3D plot locally
     plot_path = os.path.join(plot_dir, f"nsa_plot.png")
     plt.savefig(plot_path)
