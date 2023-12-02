@@ -69,7 +69,7 @@ import matplotlib.pyplot as plt
 import os
 import torch.nn.functional as F
 import time
-
+from nerfstudio.data.datasets.depth_dataset import DepthDataset
 
 @dataclass
 class ParallelDataManagerConfig(VanillaDataManagerConfig):
@@ -168,7 +168,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         local_rank: int = 0,
         **kwargs,
     ):
-        self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
+        #self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
+        self.dataset_type: Type[TDataset] = DepthDataset
         self.config = config
         self.device = device
         self.world_size = world_size
@@ -185,6 +186,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             self.dataparser.downscale_factor = 1  # Avoid opening images
         self.includes_time = self.dataparser.includes_time
         self.train_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split="train")
+
         self.eval_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split=self.test_split)
         cameras = self.train_dataparser_outputs.cameras
         if len(cameras) > 1:
@@ -197,7 +199,10 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.eval_dataset = self.create_eval_dataset()
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
 
-                
+        
+        #print('1111', self.train_dataset[0])
+
+
         # # refined oriented box
         # # another way to get R (Rodrigues)
         # target_z = scaled_transformed_vertices[1] - scaled_transformed_vertices[0]
@@ -404,6 +409,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
     def create_train_dataset(self) -> TDataset:
         """Sets up the data loaders for training."""
+        #print(self.train_dataparser_outputs.metadata)
         return self.dataset_type(
             dataparser_outputs=self.train_dataparser_outputs,
             scale_factor=self.config.camera_res_scale_factor,

@@ -68,6 +68,11 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import cv2
+from nerfstudio.cameras.cameras import Cameras
+from PIL import Image
+from torchvision.transforms.functional import to_pil_image
+
 
 DEFAULT_TIMEOUT = timedelta(minutes=30)
 
@@ -187,7 +192,7 @@ def plane_estimation(config: TrainerConfig):
         world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
         world_xyz.append(world_coordinates)
     
-    print(len(world_xyz))
+    #print(len(world_xyz))
     # calculate the plane equation using linear regression
     # Flatten the world_xyz list and convert it to a numpy array
     world_xyz_np = np.concatenate([xyz.cpu().numpy() for xyz in world_xyz], axis=0)
@@ -226,6 +231,45 @@ def plane_estimation(config: TrainerConfig):
                          [max_point[0], max_point[1], min_point[2]],
                          [max_point[0], max_point[1], max_point[2]]])
     
+
+
+    nsa_3d_ns = np.array([[-0.078125 , -0.1875   , -0.8261623], 
+                          [-0.078125 , -0.078125 , -0.8255522], 
+                          [ 0.046875 , -0.1875   , -0.82176167],
+                          [ 0.046875 , -0.078125 , -0.8211517]])
+    
+    test_idx = 10
+    test_image = pipeline.datamanager.train_dataset[test_idx]
+    test_camera = pipeline.datamanager.train_dataset.cameras[test_idx]
+    #print(pipeline.datamanager.train_dataset[test_idx])
+    print(test_camera)
+    #print(test_image, test_camera)
+
+    mask = get_NSA_mask(nsa_3d_ns, test_image['image'], test_camera)
+    # save the mask_image
+    # Convert the mask to 0 and 255
+    mask = (mask * 255).astype(np.uint8)
+
+    # Convert the numpy array to a PIL Image
+    mask_image = Image.fromarray(mask)
+
+
+    #save the mask_image
+    mask_image.save('nsa_mask.png')
+    # save the test_image
+    #test_image['image'].save('nsa_image.png')
+    #print(nsa_2d)
+    print(test_image['image'].shape) # torch.Size([738, 994, 3])
+    # TODO: save test_image
+    # Convert the tensor to a PIL Image
+    # Permute the dimensions of the tensor
+    test_image_permuted = test_image['image'].permute(2, 0, 1)
+    # Convert the tensor to a PIL Image
+    test_image_pil = to_pil_image(test_image_permuted)
+
+    # Save the image
+    test_image_pil.save('test_image.png')
+
     # Create a 3D plot
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
@@ -298,6 +342,93 @@ def plane_estimation(config: TrainerConfig):
     plt.savefig(plot_path)
     CONSOLE.print(f"Saved the NSA plot to {plot_path}")
 
+
+
+def get_NSA_mask(
+        nsa_3d_world: np.ndarray,
+        image: torch.Tensor,
+        camera: Cameras,
+    ):  
+    '''
+    Get the NSA mask for the given 3D points and camera.
+    Args:
+        nsa_3d_world: 3D points in world coordinates.
+        image: The image tensor.
+        camera: The camera object.
+    Returns:
+        The NSA mask: np.ndarray.
+    '''
+    
+    image_array = image.numpy()
+    fx = camera.fx.cpu()
+    fy = camera.fy.cpu()
+    cx = camera.cx.cpu()
+    cy = camera.cy.cpu()
+    c2w = camera.camera_to_worlds.cpu()
+    #print(c2w)
+    c2w = np.vstack((c2w.cpu(), [0, 0, 0, 1]))
+    #print(c2w_test)
+
+    # Compute the inverse of c2w_test
+    w2c = np.linalg.inv(c2w)
+
+    # Append a column of ones to the nsa_3d_ns
+    nsa_3d_world = np.hstack((nsa_3d_world, np.ones((nsa_3d_world.shape[0], 1))))
+
+    # Apply the inverse transformation
+
+    nsa_3d_camera = np.dot(w2c, nsa_3d_world.T).T
+    # The result is a 4D array, we only need the first 3 dimensions
+    nsa_3d_camera = nsa_3d_camera[:, :3]
+
+    # invert y and z axis
+    nsa_3d_camera[:, 1] = -nsa_3d_camera[:, 1]
+    nsa_3d_camera[:, 2] = -nsa_3d_camera[:, 2]
+
+    # Convert the 3D points to 2D points
+    # x = (fx * X) / Z + cx
+    # y = (fy * Y) / Z + cy
+    nsa_2d = np.zeros((nsa_3d_camera.shape[0], 2))
+    #print(nsa_3d_ws)
+   
+    nsa_2d[:, 0] = ((fx * nsa_3d_camera[:, 0]) / nsa_3d_camera[:, 2] + cx).numpy().astype(int)
+    nsa_2d[:, 1] = ((fy * nsa_3d_camera[:, 1]) / nsa_3d_camera[:, 2] + cy).numpy().astype(int)
+
+    # Convert the coordinates to integer
+    nsa_2d = nsa_2d.astype(int)
+    height, width = image_array.shape[:2]
+
+    # Find the convex hull of the points
+    hull = cv2.convexHull(nsa_2d)
+    
+    # Create an empty mask of the same size as your image
+    mask = np.zeros((height, width), dtype=np.uint8) 
+
+    # Fill the polygon
+    cv2.fillPoly(mask, [hull], 1)
+
+
+    return mask
+
+
+
+
+
+
+
+
+def polygon_to_mask(img_shape, # 2d (row, col)
+                    R, # 3x3 world to camera
+                    T, # world to camera
+                    K, # intrinsic 3x3
+                    polygon, # 3d
+                    distortion_coef = None,  
+):
+    out = np.zeros(img_shape)
+    xy, _ = cv2.projectPoints(polygon, R, T, K, distortion_coef)
+    xy = xy.reshape((-1, 2))
+    mask = cv2.fillConvexPoly(out, xy.astype(np.int32), 255).astype(bool)
+    return mask, xy
 
 
 def derive_nsa(a, b, c, d, vertices):

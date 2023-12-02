@@ -307,7 +307,7 @@ def intersect_obb(
 #     directions: torch.Tensor,
 #     obb: OrientedBox,
 #     max_bound: float = 1e10,
-# ):
+# ):nerfstudio/utils/math.py
 #     # Transform ray to OBB space
 #     R, T, S = obb.R, obb.T, obb.S.to(origins.device)
 #     H = torch.eye(4, device=origins.device, dtype=origins.dtype)

@@ -329,7 +329,6 @@ class VanillaPipeline(Pipeline):
         # 5. Use the inpainted image as GT
         # 6. Could modify the loss function!
 
-
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
 

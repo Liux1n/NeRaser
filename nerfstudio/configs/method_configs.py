@@ -31,7 +31,7 @@ from nerfstudio.data.datamanagers.base_datamanager import (
     VanillaDataManager,
     VanillaDataManagerConfig,
 )
-from nerfstudio.data.datamanagers.parallel_datamanager import ParallelDataManagerConfig
+from nerfstudio.data.datamanagers.parallel_datamanager import ParallelDataManagerConfig, ParallelDataManager
 from nerfstudio.data.datamanagers.random_cameras_datamanager import (
     RandomCamerasDataManagerConfig,
 )
@@ -214,6 +214,8 @@ method_configs["nerfacto-huge"] = TrainerConfig(
     vis="viewer",
 )
 
+
+'''
 method_configs["depth-nerfacto"] = TrainerConfig(
     method_name="depth-nerfacto",
     steps_per_eval_batch=500,
@@ -250,6 +252,44 @@ method_configs["depth-nerfacto"] = TrainerConfig(
     viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
     vis="viewer",
 )
+'''
+
+method_configs["depth-nerfacto"] = TrainerConfig(
+    method_name="depth-nerfacto",
+    steps_per_eval_batch=500,
+    steps_per_save=2000,
+    max_num_iterations=30000,
+    mixed_precision=True,
+    pipeline=VanillaPipelineConfig(
+        datamanager=ParallelDataManagerConfig(
+            _target=ParallelDataManager[DepthDataset],
+            dataparser=NerfstudioDataParserConfig(),
+            train_num_rays_per_batch=4096,
+            eval_num_rays_per_batch=4096,
+        ),
+        model=DepthNerfactoModelConfig(
+            eval_num_rays_per_chunk=1 << 15,
+            camera_optimizer=CameraOptimizerConfig(mode="SO3xR3"),
+        ),
+    ),
+    optimizers={
+        "proposal_networks": {
+            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "scheduler": None,
+        },
+        "fields": {
+            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "scheduler": None,
+        },
+        "camera_opt": {
+            "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
+            "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-4, max_steps=5000),
+        },
+    },
+    viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
+    vis="viewer",
+)
+
 
 method_configs["instant-ngp"] = TrainerConfig(
     method_name="instant-ngp",

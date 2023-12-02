@@ -422,7 +422,8 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         self.train_dataset = self.create_train_dataset()
         self.eval_dataset = self.create_eval_dataset()
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
-
+        
+        print('1111', self.train_dataset[0])
 
         #surface detection
         # Getting Object Occupancy Grid
