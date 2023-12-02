@@ -189,6 +189,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.includes_time = self.dataparser.includes_time
         self.train_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split="train")
         self.eval_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split=self.test_split)
+        CONSOLE.log(f"train on images: {self.train_dataparser_outputs.image_filenames}")
+        CONSOLE.log(f"eval on images: {self.eval_dataparser_outputs.image_filenames}")
         cameras = self.train_dataparser_outputs.cameras
         if len(cameras) > 1:
             for i in range(1, len(cameras)):

@@ -440,7 +440,7 @@ class VanillaPipeline(Pipeline):
             transient=True,
         ) as progress:
             task = progress.add_task("[green]Evaluating all eval images...", total=num_images)
-            for camera_ray_bundle, batch in self.datamanager.fixed_indices_eval_dataloader:
+            for image_idx, (camera_ray_bundle, batch) in enumerate(self.datamanager.fixed_indices_eval_dataloader):
                 # time this the following line
                 inner_start = time()
                 height, width = camera_ray_bundle.shape
@@ -451,9 +451,11 @@ class VanillaPipeline(Pipeline):
                 if output_path is not None:
                     camera_indices = camera_ray_bundle.camera_indices
                     assert camera_indices is not None
+                    filename = self.datamanager.fixed_indices_eval_dataloader.input_dataset.image_filenames[image_idx]
+                    filename = filename.stem # don't want extension
                     for key, val in images_dict.items():
                         Image.fromarray((val * 255).byte().cpu().numpy()).save(
-                            output_path / "{0:06d}-{1}.jpg".format(int(camera_indices[0, 0, 0]), key)
+                            output_path / f"{filename}_{key}.jpg"
                         )
                 assert "num_rays_per_sec" not in metrics_dict
                 metrics_dict["num_rays_per_sec"] = num_rays / (time() - inner_start)
