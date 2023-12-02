@@ -27,7 +27,11 @@ import tyro
 
 from nerfstudio.utils.eval_utils import eval_setup
 from nerfstudio.utils.rich_utils import CONSOLE
-
+from nerfstudio.data.utils.dataloaders import (
+    CacheDataloader,
+    FixedIndicesEvalDataloader,
+    RandIndicesEvalDataloader,
+)
 
 @dataclass
 class ComputePSNR:
@@ -39,14 +43,27 @@ class ComputePSNR:
     output_path: Path = Path("output.json")
     # Optional path to save rendered outputs to.
     render_output_path: Optional[Path] = None
+    
+    # if True, also run eval on training data
+    render_all_images: bool = False
 
     def main(self) -> None:
         """Main function."""
         config, pipeline, checkpoint_path, _ = eval_setup(self.load_config)
         assert self.output_path.suffix == ".json"
         if self.render_output_path is not None:
-            self.render_output_path.mkdir(parents=True)
+            self.render_output_path.mkdir(parents=True, exist_ok=True)
+
+        # 1. print the camera pose of every single image in the dataset
         metrics_dict = pipeline.get_average_eval_image_metrics(output_path=self.render_output_path, get_std=True)
+        if self.render_all_images:
+            CONSOLE.log("performing additional eval on test images")
+            pipeline.datamanager.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
+                input_dataset=pipeline.datamanager.train_dataset,
+                device=pipeline.datamanager.fixed_indices_eval_dataloader.device,
+            )
+            additional_metrics_dict = pipeline.get_average_eval_image_metrics(output_path=self.render_output_path, get_std=True)
+            metrics_dict["additional_eval"] = additional_metrics_dict
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         # Get the output and define the names to save to
         benchmark_info = {
