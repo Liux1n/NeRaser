@@ -33,6 +33,7 @@ from rich.progress import (
     Progress,
     TextColumn,
     TimeElapsedColumn,
+    TaskProgressColumn,
 )
 from torch import nn
 from torch.nn import Parameter
@@ -434,9 +435,12 @@ class VanillaPipeline(Pipeline):
         with Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
+            TaskProgressColumn(
+                text_format="[progress.percentage]{task.completed}/{task.total:>.0f}({task.percentage:>3.1f}%)",
+                show_speed=True,
+            ),
             TimeElapsedColumn(),
             MofNCompleteColumn(),
-            transient=True,
         ) as progress:
             task = progress.add_task("[green]Evaluating all eval images...", total=num_images)
             for image_idx, (camera_ray_bundle, batch) in enumerate(self.datamanager.fixed_indices_eval_dataloader):
@@ -454,8 +458,17 @@ class VanillaPipeline(Pipeline):
                     filename = filename.stem # don't want extension
                     for key, val in images_dict.items():
                         Image.fromarray((val * 255).byte().cpu().numpy()).save(
-                            output_path / f"{filename}_{key}.jpg"
+                            output_path / f"{filename}_{key}.png"
                         )
+                        if key == "img":  # this is the original + render side by side, render on the right
+                            # save the render on its own for easier inpainting
+                            img = (val * 255).byte().cpu().numpy()
+                            h, w, _ = img.shape
+                            render = img[:, w//2:, :]
+                            Image.fromarray(render).save(
+                                # name in lama format
+                                output_path / f"{filename.replace('_', '')}_render.png"
+                            )
                 assert "num_rays_per_sec" not in metrics_dict
                 metrics_dict["num_rays_per_sec"] = num_rays / (time() - inner_start)
                 fps_str = "fps"
