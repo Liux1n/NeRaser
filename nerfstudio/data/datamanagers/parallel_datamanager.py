@@ -168,6 +168,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         world_size: int = 1,
         local_rank: int = 0,
         load_dir: Optional[Path] = None, # added for above-plane bbox derivation
+        base_dir: Optional[Path] = None, # added for saving object_occupancy.npy
         **kwargs,
     ):
         self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
@@ -201,6 +202,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
         # added for above-plane bbox derivation
         self.load_dir = load_dir
+        # added for saving object_occupancy.npy
+        self.base_dir = base_dir
 
                 
         # # refined oriented box
@@ -288,8 +291,12 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         print(f"number of occupied voxels: {num_occupied_voxels}")
 
         # Optionally save object_occupancy for visualization
-        np.save("object_occupancy.npy", self.object_occupancy.cpu().numpy())
-        print("Saved object_occupancy.npy")
+        if self.base_dir is not None:
+            save_path = self.base_dir / "wandb/plots/object_occupancy.npy"
+        else:
+            save_path = "object_occupancy.npy"
+        np.save(save_path, self.object_occupancy.cpu().numpy())
+        print("Saved object_occupancy.npy to", save_path)
 
         # get new self.object_aabb by finding the min and max points of the object_occupancy grid
         self.occupied_coordinates = self.voxel_coords[:, self.object_occupancy]

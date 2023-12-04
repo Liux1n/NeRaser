@@ -157,6 +157,7 @@ class Trainer:
             local_rank=self.local_rank,
             grad_scaler=self.grad_scaler,
             load_dir=self.config.load_dir, # added for above table obb derivation
+            base_dir=self.base_dir, # added
         )
         self.optimizers = self.setup_optimizers()
 

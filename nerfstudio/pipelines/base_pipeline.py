@@ -258,6 +258,7 @@ class VanillaPipeline(Pipeline):
         local_rank: int = 0,
         grad_scaler: Optional[GradScaler] = None,
         load_dir: Optional[Path] = None, # added for above-table obb derivation
+        base_dir: Optional[Path] = None, # added
     ):
         super().__init__()
         self.config = config
@@ -265,9 +266,10 @@ class VanillaPipeline(Pipeline):
 
         # added for above-table obb derivation
         self.load_dir = load_dir
+        self.base_dir = base_dir
 
         self.datamanager: DataManager = config.datamanager.setup(
-            device=device, test_mode=test_mode, world_size=world_size, local_rank=local_rank, load_dir=self.load_dir
+            device=device, test_mode=test_mode, world_size=world_size, local_rank=local_rank, load_dir=self.load_dir, base_dir=self.base_dir
         )
         self.datamanager.to(device)
         # TODO(ethan): get rid of scene_bounds from the model
