@@ -310,13 +310,15 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         torch.cuda.empty_cache()
 
         # derive above-plane bbox if load_dir is not None
-        if self.load_dir is not None:
-            plane_coeff_path = os.path.join(self.load_dir.parent, "wandb/plots/plane_coefficients.npy")
+        if True or self.load_dir is not None:
+            # plane_coeff_path = os.path.join(self.load_dir.parent, "wandb/plots/plane_coefficients.npy")
+            plane_coeff_path = "plane_coefficients.npy"
             print(f"plane_coeff_path: {plane_coeff_path}")
             if os.path.exists(plane_coeff_path):
                 plane_coefficients = np.load(plane_coeff_path)
                 print(f"plane_coefficients: {plane_coefficients}")
                 self.object_obb = self.get_above_plane_obb(plane_coefficients)
+        assert self.object_obb
                 
         torch.cuda.empty_cache()
 
