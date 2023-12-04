@@ -86,7 +86,7 @@ class RayGenerator_surface_detection(nn.Module):
         c = ray_indices[:, 0]  # camera indices
         y = ray_indices[:, 1]  # row indices
         x = ray_indices[:, 2]  # col indices
-        coords = self.image_coords[y, x]
+        coords = self.image_coords[y.long(), x.long()]
     
         #print(mode_surface_detection)
         ray_bundle = self.cameras.generate_rays(
