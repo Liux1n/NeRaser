@@ -70,6 +70,9 @@ import os
 import torch.nn.functional as F
 import time
 from nerfstudio.data.datasets.depth_dataset import DepthDataset
+import cv2
+from nerfstudio.cameras.cameras import Cameras
+
 
 @dataclass
 class ParallelDataManagerConfig(VanillaDataManagerConfig):
@@ -295,6 +298,13 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         print(f"self.object_aabb derived from occupancy grid: {self.object_aabb}")
         torch.cuda.empty_cache()
 
+
+        # new:
+        
+        
+
+
+
         # Spawn is critical for not freezing the program (PyTorch compatability issue)
         # check if spawn is already set
         if mp.get_start_method(allow_none=True) is None:
@@ -406,6 +416,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         # Save the plot
         plt.savefig("object_occupancy.png")
         print("Saved object_occupancy.png")
+
 
     def create_train_dataset(self) -> TDataset:
         """Sets up the data loaders for training."""

@@ -72,6 +72,7 @@ import cv2
 from nerfstudio.cameras.cameras import Cameras
 from PIL import Image
 from torchvision.transforms.functional import to_pil_image
+from nerfstudio.data.scene_box import OrientedBox
 
 
 DEFAULT_TIMEOUT = timedelta(minutes=30)
@@ -246,6 +247,8 @@ def plane_estimation(config: TrainerConfig):
     #print(test_image, test_camera)
 
     mask = get_NSA_mask(nsa_3d_ns, test_image['image'], test_camera)
+
+    obb = get_obb(nsa_3d_ns, vertices)
     # save the mask_image
     # Convert the mask to 0 and 255
     mask = (mask * 255).astype(np.uint8)
@@ -282,7 +285,7 @@ def plane_estimation(config: TrainerConfig):
     # xx, yy = np.meshgrid(range(-5, 5), range(-5, 5))
     xx, yy = np.meshgrid(range(-2, 2), range(-2, 2))
     zz = (-a * xx - b * yy - d) / c
-    ax.plot_surface(xx, yy, zz, alpha=0.5)
+    #ax.plot_surface(xx, yy, zz, alpha=0.5)
 
     # # plot the reference plane
     # xx1, yy1 = np.meshgrid(range(-5, 5), range(-5, 5))
@@ -296,7 +299,7 @@ def plane_estimation(config: TrainerConfig):
     # for vertex in vertices:
     #     ax.scatter(*vertex)
 
-    # Plot the bbox
+    """ # Plot the bbox
     edges = {
         "x": [(0, 4), (1, 5), (2, 6), (3, 7)],
         "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
@@ -310,9 +313,13 @@ def plane_estimation(config: TrainerConfig):
             ending_vertex = vertices[j]
             # Plot the edge
             ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], 
-                    [starting_vertex[2], ending_vertex[2]], color="red")    
+                    [starting_vertex[2], ending_vertex[2]], color="red")    """ 
+    # PLOT nsa_3d_ns    
+    # Plot the points in nsa_3d_ns
+    ax.scatter(nsa_3d_ns[:, 0], nsa_3d_ns[:, 1], nsa_3d_ns[:, 2], color="red")
+    # Plot the points in world_xyz
 
-    # plt.show()
+    plt.show()
     
     # The equation of the plane is `ax + by + cz + d = 0`
     CONSOLE.print(f"The points used for the plane equation are: {world_xyz_np}")
@@ -375,6 +382,8 @@ def get_NSA_mask(
     # Append a column of ones to the nsa_3d_ns
     nsa_3d_world = np.hstack((nsa_3d_world, np.ones((nsa_3d_world.shape[0], 1))))
 
+    #print('hi',nsa_3d_world)
+
     # Apply the inverse transformation
 
     nsa_3d_camera = np.dot(w2c, nsa_3d_world.T).T
@@ -412,7 +421,53 @@ def get_NSA_mask(
 
 
 
+def get_obb(
+        nsa_3d_world: np.ndarray,
+        aabb_vertices,
+    ):
+    lower_vertices = np.vstack((aabb_vertices[:1, :], aabb_vertices[2:3, :], 
+                                aabb_vertices[4:5, :], aabb_vertices[6:7, :]))
+    #upper_vertices = np.vstack((aabb_vertices[1:2, :], aabb_vertices[3:4, :], 
+    #                            aabb_vertices[5:6, :], aabb_vertices[7:8, :]))
 
+    # find max z-coordinate among the lower four points of vertices
+    max_z_lower_vertices = np.max(lower_vertices[:, 2])
+    # find min z-coordinate among the nsa_3d_ns
+    min_z_nsa_3d_ns = np.min(nsa_3d_world[:, 2])
+    # find z axis distance between lower and min z-coordinate among the nsa_3d_world
+    z_offset = max_z_lower_vertices - min_z_nsa_3d_ns
+
+    parallel_points = nsa_3d_world + np.array([0, 0, z_offset])
+
+    # Find the maximum z-coordinate among the upper four points of vertices
+    max_z_aabb = np.max(aabb_vertices[4:, 2])
+    min_z_parallel_points = np.min(parallel_points[:, 2])
+    z_shift = max_z_aabb - min_z_parallel_points
+
+    upper_obb_vertices = parallel_points + np.array([0, 0, z_shift])
+
+    obb_vertices = np.vstack((nsa_3d_world, upper_obb_vertices))
+
+    target_z = obb_vertices[5] - obb_vertices[1]
+    normalized_target_z = target_z / np.linalg.norm(target_z)
+    base_z = np.array([0., 0., 1.])
+    v = np.cross(base_z, normalized_target_z)
+    c = np.dot(base_z, normalized_target_z)
+    s = np.linalg.norm(v)
+    kmat = np.array([[0, -v[2], v[1]],
+                    [v[2], 0, -v[0]],
+                    [-v[1], v[0], 0]])
+    obb_R = np.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s ** 2))
+    # get S
+    target_x = obb_vertices[2] - obb_vertices[0]
+    target_y = obb_vertices[3] - obb_vertices[2]
+    obb_S = np.array([np.linalg.norm(target_x), np.linalg.norm(target_y), np.linalg.norm(target_z)])
+    # get T
+    obb_T = np.mean(obb_vertices, axis=0)
+    # plot obb_vertices
+    object_obb = OrientedBox(R=obb_R, T=obb_T, S=obb_S)
+
+    return object_obb
 
 
 
