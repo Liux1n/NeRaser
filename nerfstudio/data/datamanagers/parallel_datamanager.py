@@ -675,7 +675,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
             input_dataset=self.eval_dataset,
             device=self.device,
-            num_workers=self.world_size * 4,
+            num_workers=2,
+            object_obb=self.object_obb, # new
         )
         self.eval_dataloader = RandIndicesEvalDataloader(
             input_dataset=self.eval_dataset,
