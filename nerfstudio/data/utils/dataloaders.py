@@ -202,7 +202,6 @@ class EvalDataloader(DataLoader):
         Args:
             image_idx: Camera image index
         """
-        plane_coefficients = np.load('plane_coefficients.npy')
         ray_bundle = self.cameras.generate_rays(camera_indices=image_idx, keep_shape=True, object_aabb=self.object_aabb, object_obb=self.object_obb) # added object_aabb, object_obb
         batch = self.input_dataset[image_idx]
         batch = get_dict_to_torch(batch, device=self.device, exclude=["image"])

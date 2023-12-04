@@ -377,6 +377,9 @@ class VanillaPipeline(Pipeline):
         with torch.no_grad():
             model_outputs = self.model(ray_bundle) # depth / expected_depth / prop_depth_0 / prop_depth_1
             depth = model_outputs["depth"]
+
+            # also sample the corresponding color
+            color = model_outputs["rgb"] 
         
         '''
         RayBundle(origins=tensor([0.2350, 0.7207, 0.0918], device='cuda:0'), directions=tensor([-0.5048, -0.4801, -0.7174], device='cuda:0'), pixel_area=tensor([1.4408e-06], device='cuda:0'), camera_indices=tensor([0], device='cuda:0'), nears=None, fars=None, metadata={'directions_norm': tensor([1.0684], device='cuda:0')}, times=None)
@@ -387,7 +390,7 @@ class VanillaPipeline(Pipeline):
         '''
 
         self.train()
-        return depth
+        return depth, color
 
 
     @profiler.time_function

@@ -74,6 +74,8 @@ DEFAULT_TIMEOUT = timedelta(minutes=30)
 # speedup for when input size to model doesn't change (much)
 torch.backends.cudnn.benchmark = True  # type: ignore
 
+# new
+import scipy
 
 def _find_free_port() -> str:
     """Finds a free port."""
@@ -159,9 +161,23 @@ def plane_estimation(config: TrainerConfig):
     else:
         CONSOLE.print("No Nerfstudio checkpoint to load, so training from scratch.")
 
-    output = pipeline.get_surface_detection(0,pipeline.datamanager.ray_bundle_surface_detection)
+    output, colors = pipeline.get_surface_detection(pipeline.datamanager.ray_bundle_surface_detection)
     num_image = len(pipeline.datamanager.expanded_cameras)
     assert num_image == len(output) , f"false length"
+
+    print(f"output.shape: {output.shape}")
+    print(f"colors.shape: {colors.shape}")
+    print(f"num_image: {num_image}")
+    colors = colors.cpu()
+    # find the median of each column
+    median = np.median(colors, axis=0) # (3,)
+    # find the covariance matrix of the colors values
+    cov = np.cov(colors.T) # (3, 3)
+    # inverse of the covariance matrix
+    cov_inv = np.linalg.inv(cov) # (3, 3)
+    # find the mahalanobis distance of each point from the median
+    mahalanobis = scipy.spatial.distance.cdist(colors, [median], metric='mahalanobis', VI=cov_inv) # (N, 1)
+    mahalanobis_similarity = 1 / (1 + mahalanobis) # (N, 1)
 
     world_xyz = []
     for i in range(num_image):
@@ -193,10 +209,20 @@ def plane_estimation(config: TrainerConfig):
     world_xyz_np = np.concatenate([xyz.cpu().numpy() for xyz in world_xyz], axis=0)
     # Create a LinearRegression object
     #reg = LinearRegression()
-    reg = TheilSenRegressor(random_state=0)
+    # reg = TheilSenRegressor(random_state=0)
+    # use a Huber regressor
+    reg = HuberRegressor()
+
+    # filter out points with mahalanobis similarity less than some threshold
+    similarity_threshold = 0.6
+    world_xyz_np = world_xyz_np[mahalanobis_similarity.flatten() > similarity_threshold]
+    mahalanobis_similarity = mahalanobis_similarity[mahalanobis_similarity.flatten() > similarity_threshold]
+    print(f"Filtering out points with color mahalanobis similarity less than {similarity_threshold}, number of remaining points: {world_xyz_np.shape[0]}")
 
     # Fit the model to the data
-    reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2])
+    # reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2])
+    reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2], sample_weight=mahalanobis_similarity.flatten())
+    print(f"Used {reg.__class__.__name__} weighted by mahalanobis similarity")
 
     # The coefficients a, b are in reg.coef_, and the intercept d is in reg.intercept_
     a, b = reg.coef_
@@ -206,6 +232,9 @@ def plane_estimation(config: TrainerConfig):
     # vertices = pipeline.datamanager.vertices
     # print("Vertices of bbox\n")
     # print(vertices)
+
+    # read object_occupancy from datamanager as numpy on cpu
+    object_occupancy = pipeline.datamanager.object_occupancy.cpu().numpy()
 
     # read aabb from occupancy grid as numpy on cpu
     object_aabb = pipeline.datamanager.object_aabb.cpu().numpy()
@@ -275,15 +304,31 @@ def plane_estimation(config: TrainerConfig):
     CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
     CONSOLE.print(f"The object bbox vertices are {vertices}")
 
+    # config.set_timestamp()
+    plot_dir = os.path.join(str(load_dir).replace('nerfstudio_models', ''), 'wandb/plots')
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+
+    # save the object occupancy grid as npy file
+    occupancy_path = os.path.join(plot_dir, f"object_occupancy.npy")
+    np.save(occupancy_path, object_occupancy)
+    print(f"Saved the object occupancy grid to {occupancy_path}")
     # save the points for the plane equation as npy file
-    np.save('plane_samples.npy', world_xyz_np)
-    print("Saved the plane samples to plane_samples.npy")
+    samples_path = os.path.join(plot_dir, f"plane_samples.npy")
+    np.save(samples_path, world_xyz_np)
+    print(f"Saved the plane samples to {samples_path}")
+    # save the colors of the points as npy file
+    colors_path = os.path.join(plot_dir, f"sample_colors.npy")
+    np.save(colors_path, colors)
+    print(f"Saved the colors of the points to {colors_path}")
     # save the coefficients of the plane equation as npy file
-    np.save('plane_coefficients.npy', np.array([a, b, c, d]))
-    print("Saved the plane coefficients to plane_coefficients.npy")
+    plane_path = os.path.join(plot_dir, f"plane_coefficients.npy")
+    np.save(plane_path, np.array([a, b, c, d]))
+    print(f"Saved the plane coefficients to {plane_path}")
     # save the aabb as npy file
-    np.save('aabb.npy', object_aabb)
-    print("Saved the aabb to aabb.npy")
+    aabb_path = os.path.join(plot_dir, f"aabb.npy")
+    np.save(aabb_path, object_aabb)
+    print(f"Saved the aabb to {aabb_path}")
 
     bbox_intersections = derive_nsa(a, b, c, d, vertices)
     # plot the intersections in the 3D plot
@@ -291,10 +336,6 @@ def plane_estimation(config: TrainerConfig):
         ax.scatter(*intersection, color="green")
     print(f"bbox_intersections: {bbox_intersections}")
     # save the 3D plot locally
-    config.set_timestamp()
-    plot_dir = os.path.join(config.get_base_dir() / config.logging.relative_log_dir, 'wandb/plots')
-    if not os.path.exists(plot_dir):
-        os.makedirs(plot_dir)
     plot_path = os.path.join(plot_dir, f"nsa_plot.png")
     plt.savefig(plot_path)
     CONSOLE.print(f"Saved the NSA plot to {plot_path}")
