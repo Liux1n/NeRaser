@@ -289,6 +289,7 @@ def plane_estimation(config: TrainerConfig):
     # plot the intersections in the 3D plot
     for intersection in bbox_intersections:
         ax.scatter(*intersection, color="green")
+    print(f"bbox_intersections: {bbox_intersections}")
     # save the 3D plot locally
     config.set_timestamp()
     plot_dir = os.path.join(config.get_base_dir() / config.logging.relative_log_dir, 'wandb/plots')

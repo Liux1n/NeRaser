@@ -312,9 +312,9 @@ def intersect_plane(
     b = plane_coefficients[1]
     c = plane_coefficients[2]
     d = plane_coefficients[3]
-    normal = torch.Tensor([a,b,c])
+    normal = torch.Tensor([a,b,c]).to(origins.device)
     normal = safe_normalize(normal)     #get plane normal
-    point = torch.Tensor([0,0,-d/c])
+    point = torch.Tensor([0,0,-d/c]).to(origins.device)
     t = torch.inner((point - origins),normal)/torch.inner(directions,normal)
     return t
 

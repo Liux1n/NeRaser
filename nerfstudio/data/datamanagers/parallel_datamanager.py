@@ -69,6 +69,7 @@ import matplotlib.pyplot as plt
 import os
 import torch.nn.functional as F
 import time
+import scipy.spatial.transform.Rotation as R
 
 
 @dataclass
@@ -166,6 +167,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         test_mode: Literal["test", "val", "inference"] = "val",
         world_size: int = 1,
         local_rank: int = 0,
+        load_dir: Optional[Path] = None, # added for above-table bbox derivation
         **kwargs,
     ):
         self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
@@ -197,6 +199,9 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.eval_dataset = self.create_eval_dataset()
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
 
+        # added for above-table bbox derivation
+        self.load_dir = load_dir
+
                 
         # # refined oriented box
         # # another way to get R (Rodrigues)
@@ -225,6 +230,9 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
         # train_dataparser_outputs.scene_box.aabb: tensor([[-1., -1., -1.],
         # [ 1.,  1.,  1.]])
+
+        print(f"train_dataparser_outputs.dataparser_transform: {self.train_dataparser_outputs.dataparser_transform}")
+        print(f"train_dataparser_outputs.dataparser_scale: {self.train_dataparser_outputs.dataparser_scale}")
 
         # train_dataparser_outputs.dataparser_transform: tensor([[ 0.0237,  0.5714, -0.8204,  0.4603],
         # [ 0.9987,  0.0237,  0.0453,  0.5088],
@@ -290,6 +298,50 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         max_point = torch.max(self.occupied_coordinates, dim=1)[0]
         self.object_aabb = torch.vstack([min_point, max_point])
         print(f"self.object_aabb derived from occupancy grid: {self.object_aabb}")
+        torch.cuda.empty_cache()
+
+        # derive above-table bbox if load_dir is not None
+        if self.load_dir is not None:
+            plane_coeff_path = os.path.join(self.load_dir.parent, "wandb/plots/plane_coefficients.npy")
+            print(f"plane_coeff_path: {plane_coeff_path}")
+            if os.path.exists(plane_coeff_path):
+                plane_coefficients = np.load(plane_coeff_path)
+                print(f"plane_coefficients: {plane_coefficients}")
+                a, b, c, d = tuple(plane_coefficients)
+                normal = torch.tensor([a, b, c])
+                normalized_normal = normal / torch.linalg.norm(normal)
+                # make sure the z component of the normal is positive
+                if normalized_normal[2] < 0:
+                    normalized_normal = -normalized_normal
+                # convert all self.occupied_coordinates to a new coordinate system where the z-axis is the normal of the plane, and the xy-plane is the plane specified by the plane coefficients ax + by + cz + d = 0
+                # Then, by finding the min and max points of the new self.occupied_coordinates, and clamping the z component to be above 1, we can get the above-table bbox
+                # First, find the rotation matrix that rotates the z-axis to the normal of the plane
+                v = torch.cross(torch.tensor([0., 0., 1.]), normalized_normal)
+                c = torch.dot(torch.tensor([0., 0., 1.]), normalized_normal)
+                s = v.norm()
+                kmat = torch.tensor([[0, -v[2], v[1]],
+                                    [v[2], 0, -v[0]],
+                                    [-v[1], v[0], 0]])
+                R = torch.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s ** 2))
+                # Then, find the translation vector that translates the origin to the plane
+                T = -d * normalized_normal
+                # Then, find the scale vector that scales the z-axis to the distance between the origin and the plane
+                S = torch.tensor([1, 1, torch.linalg.norm(T)])
+                # Then, find the new self.occupied_coordinates
+                self.occupied_coordinates_tablealigned = torch.matmul(R, self.occupied_coordinates) + T.view(3, 1)
+                # get the min and max points of the new self.occupied_coordinates
+                min_point_tablealigned = torch.min(self.occupied_coordinates_tablealigned, dim=1)[0]
+                max_point_tablealigned = torch.max(self.occupied_coordinates_tablealigned, dim=1)[0]
+                # clamp the z component to be above 0
+                min_point_tablealigned[2] = torch.max(min_point_tablealigned[2], torch.tensor(0.))
+                max_point_tablealigned[2] = torch.max(max_point_tablealigned[2], torch.tensor(0.))
+                # get the above-table bbox as a OrientedBox object
+                obb_R = R
+                obb_S = max_point_tablealigned - min_point_tablealigned
+                # obb_T = 
+
+
+                
         torch.cuda.empty_cache()
 
         # Spawn is critical for not freezing the program (PyTorch compatability issue)

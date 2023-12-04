@@ -529,11 +529,13 @@ class Cameras(TensorDataclass):
 
 
                 # calculate the plane intersection, replace the t_max if intersection on the plane satisfactory
-                plane_coefficients = np.load('plane_coefficients.npy')
-                t_plane = nerfstudio.utils.math.intersect_plane(plane_coefficients,rays_o, rays_d)
-                mask = (t_plane < t_max) & (t_plane > 1e-2)
-                t_max[mask] = t_plane[mask]
-
+                # plane_coefficients = np.load('plane_coefficients.npy')
+                # t_plane = nerfstudio.utils.math.intersect_plane(plane_coefficients,rays_o, rays_d)
+                # # shape of t_max: torch.Size([733572, 1])
+                # # shape of t_plane: torch.Size([733572])
+                # torch.cuda.empty_cache()
+                # mask = (t_plane < t_max) & (t_plane > 1e-2)
+                # t_max[mask] = t_plane[mask]
 
                 raybundle.nears = t_max
 
