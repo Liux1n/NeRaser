@@ -69,7 +69,7 @@ import matplotlib.pyplot as plt
 import os
 import torch.nn.functional as F
 import time
-import scipy.spatial.transform.Rotation as R
+import scipy.ndimage as ndimage
 
 
 @dataclass
@@ -167,7 +167,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         test_mode: Literal["test", "val", "inference"] = "val",
         world_size: int = 1,
         local_rank: int = 0,
-        load_dir: Optional[Path] = None, # added for above-table bbox derivation
+        load_dir: Optional[Path] = None, # added for above-plane bbox derivation
         **kwargs,
     ):
         self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
@@ -199,7 +199,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.eval_dataset = self.create_eval_dataset()
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
 
-        # added for above-table bbox derivation
+        # added for above-plane bbox derivation
         self.load_dir = load_dir
 
                 
@@ -300,47 +300,14 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         print(f"self.object_aabb derived from occupancy grid: {self.object_aabb}")
         torch.cuda.empty_cache()
 
-        # derive above-table bbox if load_dir is not None
+        # derive above-plane bbox if load_dir is not None
         if self.load_dir is not None:
             plane_coeff_path = os.path.join(self.load_dir.parent, "wandb/plots/plane_coefficients.npy")
             print(f"plane_coeff_path: {plane_coeff_path}")
             if os.path.exists(plane_coeff_path):
                 plane_coefficients = np.load(plane_coeff_path)
                 print(f"plane_coefficients: {plane_coefficients}")
-                a, b, c, d = tuple(plane_coefficients)
-                normal = torch.tensor([a, b, c])
-                normalized_normal = normal / torch.linalg.norm(normal)
-                # make sure the z component of the normal is positive
-                if normalized_normal[2] < 0:
-                    normalized_normal = -normalized_normal
-                # convert all self.occupied_coordinates to a new coordinate system where the z-axis is the normal of the plane, and the xy-plane is the plane specified by the plane coefficients ax + by + cz + d = 0
-                # Then, by finding the min and max points of the new self.occupied_coordinates, and clamping the z component to be above 1, we can get the above-table bbox
-                # First, find the rotation matrix that rotates the z-axis to the normal of the plane
-                v = torch.cross(torch.tensor([0., 0., 1.]), normalized_normal)
-                c = torch.dot(torch.tensor([0., 0., 1.]), normalized_normal)
-                s = v.norm()
-                kmat = torch.tensor([[0, -v[2], v[1]],
-                                    [v[2], 0, -v[0]],
-                                    [-v[1], v[0], 0]])
-                R = torch.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s ** 2))
-                # Then, find the translation vector that translates the origin to the plane
-                T = -d * normalized_normal
-                # Then, find the scale vector that scales the z-axis to the distance between the origin and the plane
-                S = torch.tensor([1, 1, torch.linalg.norm(T)])
-                # Then, find the new self.occupied_coordinates
-                self.occupied_coordinates_tablealigned = torch.matmul(R, self.occupied_coordinates) + T.view(3, 1)
-                # get the min and max points of the new self.occupied_coordinates
-                min_point_tablealigned = torch.min(self.occupied_coordinates_tablealigned, dim=1)[0]
-                max_point_tablealigned = torch.max(self.occupied_coordinates_tablealigned, dim=1)[0]
-                # clamp the z component to be above 0
-                min_point_tablealigned[2] = torch.max(min_point_tablealigned[2], torch.tensor(0.))
-                max_point_tablealigned[2] = torch.max(max_point_tablealigned[2], torch.tensor(0.))
-                # get the above-table bbox as a OrientedBox object
-                obb_R = R
-                obb_S = max_point_tablealigned - min_point_tablealigned
-                # obb_T = 
-
-
+                self.object_obb = self.get_above_plane_obb(plane_coefficients)
                 
         torch.cuda.empty_cache()
 
@@ -350,13 +317,62 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             mp.set_start_method("spawn")
         super().__init__()
 
+
+    def get_above_plane_obb(self, plane_coefficients):
+        a, b, c, d = tuple(plane_coefficients)
+        normal = torch.tensor([a, b, c])
+        normalized_normal = normal / torch.linalg.norm(normal)
+        # make sure the z component of the normal is positive
+        if normalized_normal[2] < 0:
+            normalized_normal = -normalized_normal
+        
+        # convert all self.occupied_coordinates to a new coordinate system where the z-axis is the normal of the plane, and the xy-plane is the plane specified by the plane coefficients ax + by + cz + d = 0
+        # Then, by finding the min and max points of the new self.occupied_coordinates, and clamping the z component to be above 1, we can get the above-plane bbox
+        # First, find the rotation matrix that rotates the z-axis to the normal of the plane
+        unit_z = torch.tensor([0., 0., 1.], dtype=normalized_normal.dtype)
+        R = self.get_rotation_aligning_vectors(unit_z, normalized_normal)
+        R = R.to(self.occupied_coordinates.dtype).to(self.device)
+        # Then, find the translation vector that translates the origin to the plane
+        T = -d * normalized_normal
+        T = T.to(self.occupied_coordinates.dtype).to(self.device)
+        # Then, find the new self.occupied_coordinates
+        self.occupied_coordinates_planealigned = torch.matmul(R.inverse(), self.occupied_coordinates) + T.view(3, 1)
+        # get the min and max points of the new self.occupied_coordinates
+        min_point_planealigned = torch.min(self.occupied_coordinates_planealigned, dim=1)[0]
+        max_point_planealigned = torch.max(self.occupied_coordinates_planealigned, dim=1)[0]
+        # clamp the z component to be above 0
+        min_point_planealigned[2] = torch.max(min_point_planealigned[2], torch.tensor(0.))
+        max_point_planealigned[2] = torch.max(max_point_planealigned[2], torch.tensor(0.))
+        # get the center point of the above-plane bbox in the new coordinate system
+        center_point_planealigned = (min_point_planealigned + max_point_planealigned) / 2
+        # get the center point of the above-plane bbox in the original coordinate system
+        center_point_obb = torch.matmul(R, center_point_planealigned - T)
+
+        # get the above-plane bbox as a OrientedBox object
+        obb_R = R
+        obb_S = max_point_planealigned - min_point_planealigned
+        obb_T = center_point_obb
+        return OrientedBox(R=obb_R, T=obb_T, S=obb_S)
+
+    def get_rotation_aligning_vectors(self, source_vector, target_vector):
+        # source_vector and target_vector are both normalized
+        # get the rotation matrix that rotates source_vector to target_vector
+        v = torch.cross(source_vector, target_vector)
+        c = torch.dot(source_vector, target_vector)
+        s = v.norm()
+        kmat = torch.tensor([[0, -v[2], v[1]],
+                            [v[2], 0, -v[0]],
+                            [-v[1], v[0], 0]])
+        R = torch.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s ** 2))
+        return R
+
     # define a new method "object_mask_from_2d_masks" that:
     # 1. initialize a 3D grid "self.object_grid" with specified resolution (e.g. 16) bounded by train_dataparser_outputs.scene_box.aabb ([-1, 1] on each axis)
     # 2. project all vertices of "self.object_grid" to all 2D image planes (using information from train_dataparser_outputs.cameras) 
     # 3. Sample the corresponding 2D masks at the projected points 
     # 4. define a new tensor "self.objectness_grid" of shape [resolution, resolution, resolution] storing the proportion of the projected points of each vertex fall in the "False" area of the 2D mask
     # 5. return a boolean tensor "object_occupancy" of the same shape as "self.objectness_grid" where each vertex is True if the corresponding vertex in "self.objectness_grid" is higher than a specified threshold (e.g. 0.9), False otherwise
-    def object_mask_from_2d_masks(self, resolution=16, threshold=1):
+    def object_mask_from_2d_masks(self, resolution=128, threshold=1):
         start_time = time.time()
         # 1. Initialize a 3D grid
         print(f"Initializing a 3D grid with resolution {resolution}...")
@@ -414,6 +430,10 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
         # 5. Return a boolean tensor where each vertex is True if the corresponding vertex in the objectness grid is higher than a specified threshold
         object_occupancy = self.objectness_grid >= threshold
+
+        # 6. dilate the object_occupancy by 1 voxel
+        struct = ndimage.generate_binary_structure(3, 2)
+        object_occupancy = torch.from_numpy(ndimage.binary_dilation(object_occupancy.cpu(), structure=struct, iterations=1)).to(self.device)
 
         end_time = time.time()
         print(f"Time elapsed: {end_time - start_time} seconds.")
@@ -652,8 +672,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             input_dataset=self.eval_dataset,
             device=self.device,
             num_workers=self.world_size * 4,
-            object_aabb=self.object_aabb, # new
-            # object_obb=self.object_obb, # new
+            # object_aabb=self.object_aabb, # new
+            object_obb=self.object_obb, # new
         )
 
     def next_train(self, step: int) -> Tuple[RayBundle, Dict]:
