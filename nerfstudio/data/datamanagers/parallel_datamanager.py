@@ -172,8 +172,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         base_dir: Optional[Path] = None, # added for saving object_occupancy.npy
         **kwargs,
     ):
-        # self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
-        self.dataset_type: Type[TDataset] = DepthDataset
+        self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
+        # self.dataset_type: Type[TDataset] = DepthDataset
         self.config = config
         self.device = device
         self.world_size = world_size

@@ -239,6 +239,10 @@ class Nerfstudio(DataParser):
 
         # Scale poses
         scale_factor = 1.0
+        # hard coded for 2nd run
+        # TODO: fix this
+        self.config.auto_scale_poses = False
+
         if self.config.auto_scale_poses:
             scale_factor /= float(torch.max(torch.abs(poses[:, :3, 3])))
         scale_factor *= self.config.scale_factor
@@ -308,6 +312,17 @@ class Nerfstudio(DataParser):
         if "applied_scale" in meta:
             applied_scale = float(meta["applied_scale"])
             scale_factor *= applied_scale
+
+        print("\n\n\n\n")
+        print(f"the scale factor is {scale_factor}")
+        print(f"the transform matrix is {transform_matrix}")
+        print("\n\n\n\n")
+        # hardcoded for 2nd round training for mate_floor dataset
+        # TODO: fix this
+        scale_factor = 1.0
+        transform_matrix = torch.tensor([[1.0000, 0.0000, 0.0000, 0.3408],
+                                         [0.0000, 1.0000, 0.0000, 0.0175],
+                                         [0.0000, 0.0000, 1.0000, 0.7682]])
 
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,
