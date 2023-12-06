@@ -51,7 +51,8 @@ from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttrib
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import profiler
 from nerfstudio.cameras.rays import RayBundle
-
+import cv2
+import numpy as np
 def module_wrapper(ddp_or_model: Union[DDP, Model]) -> Model:
     """
     If DDP, then return the .module. Otherwise, return the model.
@@ -457,6 +458,48 @@ class VanillaPipeline(Pipeline):
                     assert camera_indices is not None
                     filename = self.datamanager.fixed_indices_eval_dataloader.input_dataset.image_filenames[image_idx]
                     filename = filename.stem # don't want extension
+                    obb = self.datamanager.object_aabb.cpu().numpy().astype(np.double) # TODO bzs
+                    ((xmin, ymin, zmin), (xmax, ymax, zmax)) = obb
+                    obb = np.array([
+                        [xmin, ymin, zmin],
+                        [xmin, ymax, zmin],
+                        [xmax, ymax, zmin],
+                        [xmax, ymin, zmin],
+                        [xmin, ymin, zmax],
+                        [xmin, ymax, zmax],
+                        [xmax, ymax, zmax],
+                        [xmax, ymin, zmax],
+                    ]).astype(np.double)
+                    T = self.datamanager.fixed_indices_eval_dataloader.input_dataset.cameras[image_idx].camera_to_worlds.cpu().numpy().astype(np.double)
+                    fx = self.datamanager.fixed_indices_eval_dataloader.input_dataset.cameras[image_idx].fx.flatten()
+                    fy = self.datamanager.fixed_indices_eval_dataloader.input_dataset.cameras[image_idx].fy.flatten()
+                    cy = self.datamanager.fixed_indices_eval_dataloader.input_dataset.cameras[image_idx].cy.flatten()
+                    cx = self.datamanager.fixed_indices_eval_dataloader.input_dataset.cameras[image_idx].cx.flatten()
+                    fx = float(fx)
+                    fy = float(fy)
+                    cy = float(cy)
+                    cx = float(cx)
+                    K = np.array([
+                        [fx, 0, cx],
+                        [0, fy, cy],
+                        [0, 0,  1],
+                    ]).astype(np.double)
+                    print(f"{obb=}")
+                    print(f"{T=}")
+                    w2c_R = T[:3, :3].T
+                    w2c_R[1:, :] *= -1 # flip y and z:
+                    w2c_T = -w2c_R @ T[:3, -1]
+                    w2c_R = w2c_R.astype(np.double)
+                    w2c_T = w2c_T.astype(np.double)
+                    print(f"{w2c_R=}")
+                    print(f"{w2c_T=}")
+                    try:
+                        uv, _ = cv2.projectPoints(obb.astype(np.double), w2c_R, w2c_T, K, None)
+                        uv = uv.reshape((-1,2))
+                        print(f"{uv=}")
+                    except Exception as e:
+                        print(e.with_traceback())
+                        uv = None
                     for key, val in images_dict.items():
                         Image.fromarray((val * 255).byte().cpu().numpy()).save(
                             output_path / f"{filename}_{key}.png"
@@ -466,10 +509,26 @@ class VanillaPipeline(Pipeline):
                             img = (val * 255).byte().cpu().numpy()
                             h, w, _ = img.shape
                             render = img[:, w//2:, :]
+                            h, w, _ = render.shape
                             Image.fromarray(render).save(
                                 # name in lama format
-                                output_path / f"{filename.replace('_', '')}_render.png"
+                                output_path / f"{filename.replace('_', '')}.png"
                             )
+                            if uv is None:
+                                continue
+                            bbox_hull = cv2.convexHull(uv.astype(np.int32))
+                            try:
+                                print(np.sum(bbox_hull))
+                            except Exception:
+                                print("oops")
+                            bbox_mask = np.zeros((h, w), dtype=np.uint8)
+                            cv2.fillPoly(bbox_mask, [bbox_hull], 255, cv2.LINE_AA)
+                            np.putmask(render[..., 0], bbox_mask, 255)
+                            Image.fromarray(render).save(
+                                # name in lama format
+                                output_path / f"{filename.replace('_', '')}_bbox.png"
+                            )
+
                 assert "num_rays_per_sec" not in metrics_dict
                 metrics_dict["num_rays_per_sec"] = num_rays / (time() - inner_start)
                 fps_str = "fps"

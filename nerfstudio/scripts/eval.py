@@ -73,7 +73,12 @@ class ComputePSNR:
         c2w_out.write_text(json.dumps({"frames": correct_c2w}, indent=2), 'utf8')
         CONSOLE.print(f"Saved correct c2w to: {c2w_out}")
         
-        assert pipeline.datamanager.object_obb
+        print(f"{pipeline.datamanager.object_obb=}")
+        pipeline.datamanager.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
+            input_dataset=pipeline.datamanager.eval_dataset,
+            device=pipeline.datamanager.fixed_indices_eval_dataloader.device,
+            object_obb=pipeline.datamanager.object_obb,
+        )
         metrics_dict = pipeline.get_average_eval_image_metrics(output_path=self.render_output_path, get_std=True)
         if self.render_all_images:
             CONSOLE.log("performing additional eval on test images")
