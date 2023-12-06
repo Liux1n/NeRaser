@@ -297,6 +297,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         # Optionally save object_occupancy for visualization
         if self.base_dir is not None:
             save_path = self.base_dir / "wandb/plots/object_occupancy.npy"
+            if not os.path.exists(os.path.dirname(save_path)):
+                os.makedirs(os.path.dirname(save_path))
         else:
             save_path = "object_occupancy.npy"
         np.save(save_path, self.object_occupancy.cpu().numpy())
