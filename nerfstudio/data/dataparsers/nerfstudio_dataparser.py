@@ -60,6 +60,7 @@ class NerfstudioDataParserConfig(DataParserConfig):
     auto_scale_poses: bool = True
     """Whether to automatically scale the poses to fit in +/- 1 bounding box."""
     eval_mode: Literal["fraction", "filename", "interval", "all"] = "fraction"
+    # eval_mode: Literal["fraction", "filename", "interval", "all"] = "filename" # hardcoded for 2nd run, TODO: fix this
     """
     The method to use for splitting the dataset into train and eval. 
     Fraction splits based on a percentage for train and the remaining for eval.
@@ -203,6 +204,7 @@ class Nerfstudio(DataParser):
             raise RuntimeError(f"The dataset's list of filenames for split {split} is missing.")
         else:
             # find train and eval indices based on the eval_mode specified
+            print(f"\n\nthe eval mode is {self.config.eval_mode}\n\n")
             if self.config.eval_mode == "fraction":
                 i_train, i_eval = get_train_eval_split_fraction(image_filenames, self.config.train_split_fraction)
             elif self.config.eval_mode == "filename":

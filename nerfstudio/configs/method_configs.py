@@ -120,6 +120,12 @@ method_configs["nerfacto"] = TrainerConfig(
             "optimizer": AdamOptimizerConfig(lr=1e-3, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-4, max_steps=5000),
         },
+        # hardcoded to 0 for now, to turn off camera optimization
+        # TODO: reverse this if necessary
+        # "camera_opt": {
+        #     "optimizer": AdamOptimizerConfig(lr=0, eps=1e-15),
+        #     "scheduler": ExponentialDecaySchedulerConfig(lr_final=0, max_steps=5000),
+        # },
     },
     viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
     vis="viewer",

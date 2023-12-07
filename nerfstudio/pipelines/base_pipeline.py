@@ -126,6 +126,14 @@ class Pipeline(nn.Module):
 
         pipeline_state = {key: value for key, value in state_dict.items() if not key.startswith("_model.")}
 
+        # Missing key(s) in state_dict: "camera_optimizer.pose_adjustment". 
+        # size mismatch for field.embedding_appearance.embedding.weight: copying a param with shape torch.Size([63, 32]) from checkpoint, the shape in current model is torch.Size([1, 32]).
+        # print(f"model_state.keys(): {model_state.keys()}")
+        # model_state.keys(): dict_keys(['device_indicator_param', 'field.aabb', 'field.max_res', 'field.num_levels', 'field.log2_hashmap_size', 'field.embedding_appearance.embedding.weight', 'field.direction_encoding.tcnn_encoding.params', 'field.position_encoding.tcnn_encoding.params', 'field.mlp_base_grid.tcnn_encoding.params', 'field.mlp_base_mlp.tcnn_encoding.params', 'field.mlp_base.0.tcnn_encoding.params', 'field.mlp_base.1.tcnn_encoding.params', 'field.mlp_head.tcnn_encoding.params', 'proposal_networks.0.aabb', 'proposal_networks.0.max_res', 'proposal_networks.0.num_levels', 'proposal_networks.0.log2_hashmap_size', 'proposal_networks.0.encoding.tcnn_encoding.params', 'proposal_networks.0.mlp_base.0.tcnn_encoding.params', 'proposal_networks.0.mlp_base.1.tcnn_encoding.params', 'proposal_networks.1.aabb', 'proposal_networks.1.max_res', 'proposal_networks.1.num_levels', 'proposal_networks.1.log2_hashmap_size', 'proposal_networks.1.encoding.tcnn_encoding.params', 'proposal_networks.1.mlp_base.0.tcnn_encoding.params', 'proposal_networks.1.mlp_base.1.tcnn_encoding.params', 'lpips.net.net.slice1.0.weight', 'lpips.net.net.slice1.0.bias', 'lpips.net.net.slice2.3.weight', 'lpips.net.net.slice2.3.bias', 'lpips.net.net.slice3.6.weight', 'lpips.net.net.slice3.6.bias', 'lpips.net.net.slice4.8.weight', 'lpips.net.net.slice4.8.bias', 'lpips.net.net.slice5.10.weight', 'lpips.net.net.slice5.10.bias', 'lpips.net.lin0.model.1.weight', 'lpips.net.lin1.model.1.weight', 'lpips.net.lin2.model.1.weight', 'lpips.net.lin3.model.1.weight', 'lpips.net.lin4.model.1.weight', 'lpips.net.lins.0.model.1.weight', 'lpips.net.lins.1.model.1.weight', 'lpips.net.lins.2.model.1.weight', 'lpips.net.lins.3.model.1.weight', 'lpips.net.lins.4.model.1.weight'])
+        print(f"model_state['field.embedding_appearance.embedding.weight'].shape: {model_state['field.embedding_appearance.embedding.weight'].shape}")
+        # hardcoded assuming the first image is used as train set for the 2nd round training, TODO: make it a parameter 
+        # model_state['field.embedding_appearance.embedding.weight'] = model_state['field.embedding_appearance.embedding.weight'][0:1, :] 
+        
         try:
             self.model.load_state_dict(model_state, strict=True)
         except RuntimeError:
