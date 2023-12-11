@@ -194,6 +194,7 @@ NeRaser/
 my_scripts/
 nsa_identification.py
 object_occupancy.*
+interpolated_depth_average.png
 
 # add by liuxin
 occupancy.ipynb

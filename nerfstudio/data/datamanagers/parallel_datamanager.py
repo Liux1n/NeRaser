@@ -170,6 +170,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         local_rank: int = 0,
         load_dir: Optional[Path] = None, # added for above-plane bbox derivation
         base_dir: Optional[Path] = None, # added for saving object_occupancy.npy
+        config_path: Optional[Path] = None, # added for eval.py
         **kwargs,
     ):
         # self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
@@ -191,6 +192,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.includes_time = self.dataparser.includes_time
         self.train_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split="train")
         self.eval_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split=self.test_split)
+        CONSOLE.log(f"train on images: {self.train_dataparser_outputs.image_filenames}")
+        CONSOLE.log(f"eval on images: {self.eval_dataparser_outputs.image_filenames}")
         cameras = self.train_dataparser_outputs.cameras
         self.cameras = cameras
         if len(cameras) > 1:
@@ -207,6 +210,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.load_dir = load_dir
         # added for saving object_occupancy.npy
         self.base_dir = base_dir
+        # added for eval.py
+        self.config_path = config_path
 
                 
         # # refined oriented box
@@ -321,8 +326,12 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         torch.cuda.empty_cache()
 
         # derive above-plane bbox if load_dir is not None
-        if self.load_dir is not None:
-            plane_coeff_path = os.path.join(self.load_dir.parent, "wandb/plots/plane_coefficients.npy")
+        # if self.load_dir is not None:
+        if self.load_dir is not None or self.config_path is not None:
+            if self.load_dir is not None:
+                plane_coeff_path = os.path.join(self.load_dir.parent, "wandb/plots/plane_coefficients.npy")
+            else:
+                plane_coeff_path = os.path.join(self.config_path.parent, "wandb/plots/plane_coefficients.npy")
             print(f"plane_coeff_path: {plane_coeff_path}")
             if os.path.exists(plane_coeff_path):
                 plane_coefficients = np.load(plane_coeff_path)
@@ -707,7 +716,9 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
             input_dataset=self.eval_dataset,
             device=self.device,
-            num_workers=self.world_size * 4,
+            # num_workers=self.world_size * 4,
+            num_workers=2,
+            object_obb=self.object_obb, # new
         )
         self.eval_dataloader = RandIndicesEvalDataloader(
             input_dataset=self.eval_dataset,

@@ -28,6 +28,12 @@ import tyro
 from nerfstudio.utils.eval_utils import eval_setup
 from nerfstudio.utils.rich_utils import CONSOLE
 
+from nerfstudio.data.utils.dataloaders import (
+    CacheDataloader,
+    FixedIndicesEvalDataloader,
+    RandIndicesEvalDataloader,
+)
+
 
 @dataclass
 class ComputePSNR:
@@ -40,13 +46,53 @@ class ComputePSNR:
     # Optional path to save rendered outputs to.
     render_output_path: Optional[Path] = None
 
+    # if True, also run eval on training data
+    render_all_images: bool = False
+
     def main(self) -> None:
         """Main function."""
         config, pipeline, checkpoint_path, _ = eval_setup(self.load_config)
         assert self.output_path.suffix == ".json"
         if self.render_output_path is not None:
-            self.render_output_path.mkdir(parents=True)
+            # self.render_output_path.mkdir(parents=True)
+            self.render_output_path.mkdir(parents=True, exist_ok=True)
+
+        # save the c2w of every image in the dataset
+        correct_c2w = list()
+        def save_c2w(dataset):
+            for idx, file_name in enumerate(dataset.image_filenames):
+                cam_idx = 0  # one camera per img
+                file_name = file_name.name
+                cams_json = dataset.cameras.to_json(idx)  # this is the only correct way to get the corresponding camera
+                cams_json["file_path"] = file_name
+                cams_json["transform_matrix"] = cams_json["camera_to_world"]
+                cams_json["camera_index"] += 1
+                correct_c2w.append(cams_json)
+
+        save_c2w(pipeline.datamanager.train_dataset)
+        save_c2w(pipeline.datamanager.eval_dataset)
+        sorted(correct_c2w, key=lambda d: d["camera_index"])
+        c2w_out = self.output_path.parent / "correct_c2w.json"
+        c2w_out.write_text(json.dumps({"frames": correct_c2w}, indent=2), 'utf8')
+        CONSOLE.print(f"Saved correct c2w to: {c2w_out}")
+
+        assert pipeline.datamanager.object_obb
+        print(f"{pipeline.datamanager.object_obb=}")
+        pipeline.datamanager.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
+            input_dataset=pipeline.datamanager.eval_dataset,
+            device=pipeline.datamanager.fixed_indices_eval_dataloader.device,
+            object_obb=pipeline.datamanager.object_obb,
+        )
         metrics_dict = pipeline.get_average_eval_image_metrics(output_path=self.render_output_path, get_std=True)
+        if self.render_all_images:
+            CONSOLE.log("performing additional eval on test images")
+            pipeline.datamanager.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
+                input_dataset=pipeline.datamanager.train_dataset,
+                device=pipeline.datamanager.fixed_indices_eval_dataloader.device,
+                object_obb=pipeline.datamanager.object_obb,
+            )
+            additional_metrics_dict = pipeline.get_average_eval_image_metrics(output_path=self.render_output_path, get_std=True)
+            metrics_dict["additional_eval"] = additional_metrics_dict
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         # Get the output and define the names to save to
         benchmark_info = {
