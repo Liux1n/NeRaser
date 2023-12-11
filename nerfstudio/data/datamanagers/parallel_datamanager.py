@@ -386,6 +386,12 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         obb_R = R
         obb_S = max_point_planealigned - min_point_planealigned
         obb_T = center_point_obb
+
+        print(f"Generating an OrientedBox object with parameters:")
+        print(f"obb_R: {obb_R}")
+        print(f"obb_S: {obb_S}")
+        print(f"obb_T: {obb_T}")
+
         return OrientedBox(R=obb_R, T=obb_T, S=obb_S)
 
     def get_rotation_aligning_vectors(self, source_vector, target_vector):
