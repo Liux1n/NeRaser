@@ -70,6 +70,7 @@ import os
 import torch.nn.functional as F
 import time
 import scipy.ndimage as ndimage
+from nerfstudio.data.datasets.depth_dataset import DepthDataset
 
 
 @dataclass
@@ -171,7 +172,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         base_dir: Optional[Path] = None, # added for saving object_occupancy.npy
         **kwargs,
     ):
-        self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
+        # self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
+        self.dataset_type: Type[TDataset] = DepthDataset # HARDCODED for depth-nerfacto TODO: change this
         self.config = config
         self.device = device
         self.world_size = world_size
@@ -190,6 +192,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         self.train_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split="train")
         self.eval_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split=self.test_split)
         cameras = self.train_dataparser_outputs.cameras
+        self.cameras = cameras
         if len(cameras) > 1:
             for i in range(1, len(cameras)):
                 if cameras[0].width != cameras[i].width or cameras[0].height != cameras[i].height:
@@ -284,19 +287,29 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         # Getting Object Occupancy Grid
         print("hello\n")
         print("------------->\n")
-        self.grid_resolution = 128 # 256 CUDA out of memory
-        self.threshold = 0.9
-        self.object_occupancy = self.object_mask_from_2d_masks(resolution=self.grid_resolution, threshold=self.threshold)        
-        num_occupied_voxels = torch.sum(self.object_occupancy)
-        print(f"number of occupied voxels: {num_occupied_voxels}")
-
-        # Optionally save object_occupancy for visualization
-        if self.base_dir is not None:
-            save_path = self.base_dir / "wandb/plots/object_occupancy.npy"
+        if self.load_dir is not None:
+            occupancy_path = os.path.join(self.load_dir.parent, "wandb/plots/object_occupancy.npy")
+            assert os.path.exists(occupancy_path), f"object_occupancy.npy does not exist in {occupancy_path}, consider running get_plane.py"
+            self.object_occupancy = torch.from_numpy(np.load(occupancy_path)).to(self.device)
+            print("Loaded object_occupancy from", occupancy_path)
+            self.voxel_coords = self.initialize_grid(self.object_occupancy.shape[0], self.train_dataparser_outputs.scene_box.aabb)
         else:
-            save_path = "object_occupancy.npy"
-        np.save(save_path, self.object_occupancy.cpu().numpy())
-        print("Saved object_occupancy.npy to", save_path)
+            self.grid_resolution = 128 # 256 CUDA out of memory
+            self.threshold = 0.9
+            self.object_occupancy = self.object_mask_from_2d_masks(resolution=self.grid_resolution, threshold=self.threshold)        
+            num_occupied_voxels = torch.sum(self.object_occupancy)
+            print(f"number of occupied voxels: {num_occupied_voxels}")
+
+            # Optionally save object_occupancy for visualization
+            if self.base_dir is not None:
+                save_dir = self.base_dir / "wandb/plots"
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                save_path = save_dir / "object_occupancy.npy"
+            else:
+                save_path = "object_occupancy.npy"
+            np.save(save_path, self.object_occupancy.cpu().numpy())
+            print("Saved object_occupancy.npy to", save_path)
 
         # get new self.object_aabb by finding the min and max points of the object_occupancy grid
         self.occupied_coordinates = self.voxel_coords[:, self.object_occupancy]
@@ -314,7 +327,14 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             if os.path.exists(plane_coeff_path):
                 plane_coefficients = np.load(plane_coeff_path)
                 print(f"plane_coefficients: {plane_coefficients}")
-                self.object_obb = self.get_above_plane_obb(plane_coefficients)
+                self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0)
+                # self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0.05)
+                # self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0.2)
+            else:
+                self.object_obb = None
+                print(f"plane_coefficients.npy does not exist in {plane_coeff_path}, consider running get_plane.py")
+        else:
+            self.object_obb = None
                 
         torch.cuda.empty_cache()
 
@@ -325,7 +345,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         super().__init__()
 
 
-    def get_above_plane_obb(self, plane_coefficients):
+    def get_above_plane_obb(self, plane_coefficients, offset_proportion=0):
         a, b, c, d = tuple(plane_coefficients)
         normal = torch.tensor([a, b, c])
         normalized_normal = normal / torch.linalg.norm(normal)
@@ -350,6 +370,13 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         # clamp the z component to be above 0
         min_point_planealigned[2] = torch.max(min_point_planealigned[2], torch.tensor(0.))
         max_point_planealigned[2] = torch.max(max_point_planealigned[2], torch.tensor(0.))
+        
+        # give a small offset to make the obb really above the plane
+        object_height = torch.abs(max_point_planealigned[2] - min_point_planealigned[2])
+        offset = object_height * offset_proportion
+        min_point_planealigned[2] = torch.max(min_point_planealigned[2], torch.tensor(offset))
+        max_point_planealigned[2] = torch.max(max_point_planealigned[2], torch.tensor(offset))
+
         # get the center point of the above-plane bbox in the new coordinate system
         center_point_planealigned = (min_point_planealigned + max_point_planealigned) / 2
         # get the center point of the above-plane bbox in the original coordinate system
@@ -553,117 +580,118 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
 
         
 
-        # generate ray for surface detection from evaluation dataset
+        # # generate ray for surface detection from evaluation dataset
+        # # TODO: move this to get_plane.py
         
-        #self.surface_detection_dataset = self.eval_dataset
-        self.surface_detection_dataset = self.train_dataset
+        # #self.surface_detection_dataset = self.eval_dataset
+        # self.surface_detection_dataset = self.train_dataset
 
 
-        self.mask = [item for item in self.surface_detection_dataset] 
-        self.surface_detection_pixel_sampler = self._get_pixel_sampler(self.surface_detection_dataset, self.config.eval_num_rays_per_batch)
+        # self.mask = [item for item in self.surface_detection_dataset] 
+        # self.surface_detection_pixel_sampler = self._get_pixel_sampler(self.surface_detection_dataset, self.config.eval_num_rays_per_batch)
         
-        #print(self.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
-        # white is 1, black is 0
-        y_outbound = self.mask[0]['mask'].shape[0] # 764
+        # #print(self.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
+        # # white is 1, black is 0
+        # y_outbound = self.mask[0]['mask'].shape[0] # 764
 
-        for i, item in enumerate(self.mask):
-            mask_array = item['mask'].numpy().squeeze()
-            y, x = np.where(mask_array == 0)
-            max_y = np.max(y)
-            #max_x = np.max(x)
-            #min_x = np.min(x)
-            #width = max_x - min_x
-            bottom_pixel = (max_y, x[np.argmax(y)]) # findv the bottom pixel of the mask
-            y_lower = bottom_pixel[0] - 5  # Subtract 5 from the y-coordinate of bottom_pixel
-             # Find the x-coordinate at this new y-coordinate
+        # for i, item in enumerate(self.mask):
+        #     mask_array = item['mask'].numpy().squeeze()
+        #     y, x = np.where(mask_array == 0)
+        #     max_y = np.max(y)
+        #     #max_x = np.max(x)
+        #     #min_x = np.min(x)
+        #     #width = max_x - min_x
+        #     bottom_pixel = (max_y, x[np.argmax(y)]) # findv the bottom pixel of the mask
+        #     y_lower = bottom_pixel[0] - 5  # Subtract 5 from the y-coordinate of bottom_pixel
+        #      # Find the x-coordinate at this new y-coordinate
 
-            above_bottom_pixel = (y_lower, bottom_pixel[1])
+        #     above_bottom_pixel = (y_lower, bottom_pixel[1])
      
-            # Find the indices where y is between y_up_bottom and y_bottom
-            indices = np.where((y >= above_bottom_pixel[0]) & (y <= bottom_pixel[0]))
+        #     # Find the indices where y is between y_up_bottom and y_bottom
+        #     indices = np.where((y >= above_bottom_pixel[0]) & (y <= bottom_pixel[0]))
 
-            # Extract the corresponding x values
-            x_values = x[indices]
+        #     # Extract the corresponding x values
+        #     x_values = x[indices]
 
-            # Compute the width as the difference between the maximum and minimum x values
-            width = np.max(x_values) - np.min(x_values)
-            #TODO: find the width of the area between y_bottom and y_up_bottom  
-            self.mask[i]['bottom_pixel'] = bottom_pixel
-            #print(bottom_pixel)
-            #self.mask[i]['y_up_bottom'] = y_up_bottom
-            self.mask[i]['width'] = width
-            #self.mask[i]['width'] = 2
+        #     # Compute the width as the difference between the maximum and minimum x values
+        #     width = np.max(x_values) - np.min(x_values)
+        #     #TODO: find the width of the area between y_bottom and y_up_bottom  
+        #     self.mask[i]['bottom_pixel'] = bottom_pixel
+        #     #print(bottom_pixel)
+        #     #self.mask[i]['y_up_bottom'] = y_up_bottom
+        #     self.mask[i]['width'] = width
+        #     #self.mask[i]['width'] = 2
             
         
         
-        y_sample_range = 60
-        num_samples = 50
+        # y_sample_range = 60
+        # num_samples = 50
 
-        # filter out out-of-bound indices
-        self.surface_detection_camera = self.surface_detection_dataset.cameras
+        # # filter out out-of-bound indices
+        # self.surface_detection_camera = self.surface_detection_dataset.cameras
 
-        # Initialize an empty numpy array
-        all_points_np = np.empty((0, 3))        
+        # # Initialize an empty numpy array
+        # all_points_np = np.empty((0, 3))        
         
-        camera_list = []
-        image_list = []
+        # camera_list = []
+        # image_list = []
 
-        for i, item in enumerate(self.mask):
+        # for i, item in enumerate(self.mask):
 
-            idx = item['image_idx']
-            bottom_y = int(item['bottom_pixel'][0])
-            bottom_x = int(item['bottom_pixel'][1])
-            width = int(item['width'])
-            camera = self.surface_detection_camera[idx]
-            image = self.surface_detection_dataset[idx]
-            # Append the camera to the camera_list
-            camera_list.append([camera] * num_samples)
-            image_list.append([image] * num_samples)
-            # Generate an idx array of the same length as points
-            idx_array = np.full((num_samples, 1), idx)
-            # Generate random x coordinates within the width
-            x_samples = np.random.randint(low= bottom_x - width/2, high= bottom_x + width/2, size=num_samples)
+        #     idx = item['image_idx']
+        #     bottom_y = int(item['bottom_pixel'][0])
+        #     bottom_x = int(item['bottom_pixel'][1])
+        #     width = int(item['width'])
+        #     camera = self.surface_detection_camera[idx]
+        #     image = self.surface_detection_dataset[idx]
+        #     # Append the camera to the camera_list
+        #     camera_list.append([camera] * num_samples)
+        #     image_list.append([image] * num_samples)
+        #     # Generate an idx array of the same length as points
+        #     idx_array = np.full((num_samples, 1), idx)
+        #     # Generate random x coordinates within the width
+        #     x_samples = np.random.randint(low= bottom_x - width/2, high= bottom_x + width/2, size=num_samples)
 
-            # Generate random y coordinates between y_up_bottom and y_bottom
-            y_samples = np.random.randint(low=bottom_y + y_sample_range -10, high=bottom_y + y_sample_range, size=num_samples)
+        #     # Generate random y coordinates between y_up_bottom and y_bottom
+        #     y_samples = np.random.randint(low=bottom_y + y_sample_range -10, high=bottom_y + y_sample_range, size=num_samples)
             
 
-            # Combine the idx, x and y coordinates into a 2D array
-            points = np.column_stack((idx_array, x_samples, y_samples))
-            #print(points.shape)
-            # Concatenate the points to all_points_np
-            all_points_np = np.concatenate((all_points_np, points), axis=0)
-            #print(all_points_np.shape)
-        # Flatten the camera_list
-        camera_list = [camera for sublist in camera_list for camera in sublist]
-        image_list = [image for sublist in image_list for image in sublist]
+        #     # Combine the idx, x and y coordinates into a 2D array
+        #     points = np.column_stack((idx_array, x_samples, y_samples))
+        #     #print(points.shape)
+        #     # Concatenate the points to all_points_np
+        #     all_points_np = np.concatenate((all_points_np, points), axis=0)
+        #     #print(all_points_np.shape)
+        # # Flatten the camera_list
+        # camera_list = [camera for sublist in camera_list for camera in sublist]
+        # image_list = [image for sublist in image_list for image in sublist]
         
-        #print(all_points_np)
-        #raise NotImplementedError
+        # #print(all_points_np)
+        # #raise NotImplementedError
         
 
-        self.ray_indices = torch.from_numpy(all_points_np).int()
-        mask = self.ray_indices[:, 1] + y_sample_range < y_outbound
+        # self.ray_indices = torch.from_numpy(all_points_np).int()
+        # mask = self.ray_indices[:, 1] + y_sample_range < y_outbound
 
-        #print(self.ray_indices)
-        #mask = self.ray_indices[:, :1] + y_sample_range < y_outbound
+        # #print(self.ray_indices)
+        # #mask = self.ray_indices[:, :1] + y_sample_range < y_outbound
 
-        camera_list = list(compress(camera_list, mask))
+        # camera_list = list(compress(camera_list, mask))
 
-        camera_list = [camera.to(self.device) for camera in camera_list]
-        image_list = list(compress(image_list, mask))
+        # camera_list = [camera.to(self.device) for camera in camera_list]
+        # image_list = list(compress(image_list, mask))
 
-        self.surface_detection_ray_generator = RayGenerator_surface_detection(self.train_dataset.cameras.to(self.device))
+        # self.surface_detection_ray_generator = RayGenerator_surface_detection(self.train_dataset.cameras.to(self.device))
 
-        # create ray bundle from ray indices
-        self.ray_bundle_surface_detection = self.surface_detection_ray_generator(self.ray_indices, mask = mask)
+        # # create ray bundle from ray indices
+        # self.ray_bundle_surface_detection = self.surface_detection_ray_generator(self.ray_indices, mask = mask)
 
-        # expand self.filtered_cameras to align with self.ray_indices
-        #self.expanded_cameras = [camera for camera in self.filtered_cameras for _ in range(num_samples)]
-        self.expanded_cameras = camera_list
-        self.filtered_data = image_list
-        #print(self.ray_indices.shape, len(self.expanded_cameras))
-        #print(self.ray_indices.shape, len(camera_list))
+        # # expand self.filtered_cameras to align with self.ray_indices
+        # #self.expanded_cameras = [camera for camera in self.filtered_cameras for _ in range(num_samples)]
+        # self.expanded_cameras = camera_list
+        # self.filtered_data = image_list
+        # #print(self.ray_indices.shape, len(self.expanded_cameras))
+        # #print(self.ray_indices.shape, len(camera_list))
 
 
 
@@ -679,7 +707,7 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             input_dataset=self.eval_dataset,
             device=self.device,
             num_workers=self.world_size * 4,
-            # object_aabb=self.object_aabb, # new
+            object_aabb=self.object_aabb, # new
             object_obb=self.object_obb, # new
         )
 
@@ -692,6 +720,19 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         bundle, batch = self.train_batch_fut.result()
         self.train_batch_fut = self.train_executor.submit(self.data_queue.get)
         ray_bundle = bundle.to(self.device)
+
+
+        # skip self.object_obb if load_dir is not None
+        if self.load_dir is not None:
+            # print("\n\n\n")
+            # nears_before = ray_bundle.nears.clone()
+            ray_bundle = self.cameras.let_raybundle_skip_bbox(raybundle=ray_bundle, object_obb=self.object_obb)
+            # nears_after = ray_bundle.nears.clone()
+            # if torch.any(nears_after != 0):
+            #     print("Ray bundle modified during training!")
+            # print(f"ray_bundle.nears after modification: {ray_bundle.nears}")
+            # print("\n\n\n")
+
         return ray_bundle, batch
 
     def next_eval(self, step: int) -> Tuple[RayBundle, Dict]:

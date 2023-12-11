@@ -50,6 +50,9 @@ from nerfstudio.model_components.shaders import NormalsShader
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import colormaps
 
+# added for judging whether to freeze some parameters
+from typing import Optional
+from pathlib import Path
 
 @dataclass
 class NerfactoModelConfig(ModelConfig):
@@ -140,6 +143,13 @@ class NerfactoModel(Model):
 
     config: NerfactoModelConfig
 
+    def __init__(self, 
+                 config: NerfactoModelConfig, 
+                 load_dir: Optional[Path] = None, 
+                 **kwargs) -> None:
+        self.load_dir = load_dir
+        super().__init__(config=config, **kwargs)
+
     def populate_modules(self):
         """Set the fields and modules."""
         super().populate_modules()
@@ -166,6 +176,7 @@ class NerfactoModel(Model):
             use_average_appearance_embedding=self.config.use_average_appearance_embedding,
             appearance_embedding_dim=self.config.appearance_embed_dim,
             implementation=self.config.implementation,
+            load_dir=self.load_dir, # added for judging whether to freeze some parameters
         )
 
         self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(

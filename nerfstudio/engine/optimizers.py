@@ -186,4 +186,10 @@ class Optimizers:
             loaded_state: the state from the previous checkpoint
         """
         for k, v in loaded_state.items():
-            self.schedulers[k].load_state_dict(v)
+            # self.schedulers[k].load_state_dict(v)
+
+            # hardcoded for turning off camera optimizer TODO: fix this
+            if k == 'camera_opt':
+                continue
+            else:
+                self.schedulers[k].load_state_dict(v)

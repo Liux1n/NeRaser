@@ -124,6 +124,35 @@ class Pipeline(nn.Module):
 
         pipeline_state = {key: value for key, value in state_dict.items() if not key.startswith("_model.")}
 
+        # # hardcoded assuming the first image is used as train set for the 2nd round training, TODO: make it a parameter 
+        # model_state['field.embedding_appearance.embedding.weight'] = model_state['field.embedding_appearance.embedding.weight'][0:1, :] 
+
+        # hardcoded selection of appearance embedding for the 2nd round training, TODO: make it a parameter
+        # train_discount = 0.1
+        # n_train = model_state['field.embedding_appearance.embedding.weight'].shape[0]
+        # train_indices_indices = torch.linspace(0, n_train - 2, int(train_discount*n_train), dtype=int) # equally spaced indices of training indices starting and ending at 0 and n_train-2
+        # train_indices_indices = torch.cat((torch.zeros(1), train_indices_indices))
+
+        # train_indices_indices = torch.tensor([0, 1, 13, 25, 37, 49, 62]) # hardcoded for polycam_mate_floor_complementarymask_fewtraining TODO: make it robust
+        # # reverse the order to see the effect of appearance embedding TODO: remove this line
+        # # train_indices_indices = torch.flip(train_indices_indices, [0])
+        # print(f"train_indices_indices: {train_indices_indices}")
+        # model_state['field.embedding_appearance.embedding.weight'] = model_state['field.embedding_appearance.embedding.weight'][train_indices_indices, :]
+
+        # # hardcoded selection of appearance embedding for polycam_mate_floor_hack (or _depth), TODO: make it robust
+        # model_state_inpainted = model_state['field.embedding_appearance.embedding.weight'][0:1, :]
+        # # repeat it for 50 times to make its size [50, 32]
+        # model_state_inpainted_repeated = model_state_inpainted.repeat(50, 1)
+        # # model_state_inpainted_repeated = model_state_inpainted.repeat(200, 1)
+        # # concatenate it with the original appearance embedding
+        # model_state['field.embedding_appearance.embedding.weight'] = torch.cat((model_state['field.embedding_appearance.embedding.weight'], model_state_inpainted_repeated), 0)
+        # print(f"model_state['field.embedding_appearance.embedding.weight'].shape: {model_state['field.embedding_appearance.embedding.weight'].shape}")
+
+        # # HARDCODED for polycam_mate_floor_partlyrepeating
+        # model_state_inpainted = model_state['field.embedding_appearance.embedding.weight'][0, :]
+        # i_train_inpainted = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62]
+        # model_state['field.embedding_appearance.embedding.weight'][i_train_inpainted, :] = model_state_inpainted.clone()
+
         try:
             self.model.load_state_dict(model_state, strict=True)
         except RuntimeError:
@@ -281,6 +310,7 @@ class VanillaPipeline(Pipeline):
             metadata=self.datamanager.train_dataset.metadata,
             device=device,
             grad_scaler=grad_scaler,
+            load_dir=self.load_dir, # added for judging whether to freeze some parameters
         )
         self.model.to(device)
 
