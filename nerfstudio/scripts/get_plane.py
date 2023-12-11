@@ -18,7 +18,7 @@ get_plane.py
 """
 from __future__ import annotations
 
-import random
+# import random
 import socket
 import traceback
 from datetime import timedelta
@@ -26,8 +26,8 @@ from typing import Any, Callable, Literal, Optional
 
 import numpy as np
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
+# import torch.distributed as dist
+# import torch.multiprocessing as mp
 import tyro
 import yaml
 
@@ -37,37 +37,40 @@ from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.utils import comms, profiler
 from nerfstudio.utils.rich_utils import CONSOLE
 import matplotlib.pyplot as plt
-import dataclasses
-import functools
+# import dataclasses
+# import functools
 import os
-import time
-from dataclasses import dataclass, field
+# import time
+# from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock
+# from threading import Lock
 from typing import Dict, List, Literal, Optional, Tuple, Type, cast
 
 import torch
-from nerfstudio.configs.experiment_config import ExperimentConfig
-from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManager
-from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
-from nerfstudio.engine.optimizers import Optimizers
-from nerfstudio.pipelines.base_pipeline import VanillaPipeline
+# from nerfstudio.configs.experiment_config import ExperimentConfig
+# from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManager
+# from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
+# from nerfstudio.engine.optimizers import Optimizers
+# from nerfstudio.pipelines.base_pipeline import VanillaPipeline
 from nerfstudio.utils import profiler, writer
-from nerfstudio.utils.decorators import check_eval_enabled, check_main_thread, check_viewer_enabled
-from nerfstudio.utils.misc import step_check
+# from nerfstudio.utils.decorators import check_eval_enabled, check_main_thread, check_viewer_enabled
+# from nerfstudio.utils.misc import step_check
 from nerfstudio.utils.rich_utils import CONSOLE
-from nerfstudio.utils.writer import EventName, TimeWriter
-from nerfstudio.viewer.server.viewer_state import ViewerState
-from nerfstudio.viewer_beta.viewer import Viewer as ViewerBetaState
-from rich import box, style
-from rich.panel import Panel
-from rich.table import Table
+# from nerfstudio.utils.writer import EventName, TimeWriter
+# from nerfstudio.viewer.server.viewer_state import ViewerState
+# from nerfstudio.viewer_beta.viewer import Viewer as ViewerBetaState
+from nerfstudio.model_components.ray_generators import RayGenerator_surface_detection
+# from rich import box, style
+# from rich.panel import Panel
+# from rich.table import Table
 from torch.cuda.amp.grad_scaler import GradScaler
 from sklearn.linear_model import LinearRegression,TheilSenRegressor, HuberRegressor
 import numpy as np
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+# from mpl_toolkits.mplot3d import Axes3D
+from itertools import compress
+
 
 DEFAULT_TIMEOUT = timedelta(minutes=30)
 
@@ -161,7 +164,120 @@ def plane_estimation(config: TrainerConfig):
     else:
         CONSOLE.print("No Nerfstudio checkpoint to load, so training from scratch.")
 
-    output, colors = pipeline.get_surface_detection(pipeline.datamanager.ray_bundle_surface_detection)
+    # generate ray for surface detection from evaluation dataset
+    # TODO: avoid "pipeline." prefix
+   
+    #pipeline.datamanager.surface_detection_dataset = pipeline.datamanager.eval_dataset
+    pipeline.datamanager.surface_detection_dataset = pipeline.datamanager.train_dataset
+
+
+    pipeline.datamanager.mask = [item for item in pipeline.datamanager.surface_detection_dataset] 
+    pipeline.datamanager.surface_detection_pixel_sampler = pipeline.datamanager._get_pixel_sampler(pipeline.datamanager.surface_detection_dataset, pipeline.datamanager.config.eval_num_rays_per_batch)
+    
+    #print(pipeline.datamanager.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
+    # white is 1, black is 0
+    y_outbound = pipeline.datamanager.mask[0]['mask'].shape[0] # 764
+
+    for i, item in enumerate(pipeline.datamanager.mask):
+        mask_array = item['mask'].numpy().squeeze()
+        y, x = np.where(mask_array == 0)
+        max_y = np.max(y)
+        #max_x = np.max(x)
+        #min_x = np.min(x)
+        #width = max_x - min_x
+        bottom_pixel = (max_y, x[np.argmax(y)]) # findv the bottom pixel of the mask
+        y_lower = bottom_pixel[0] - 5  # Subtract 5 from the y-coordinate of bottom_pixel
+         # Find the x-coordinate at this new y-coordinate
+
+        above_bottom_pixel = (y_lower, bottom_pixel[1])
+    
+        # Find the indices where y is between y_up_bottom and y_bottom
+        indices = np.where((y >= above_bottom_pixel[0]) & (y <= bottom_pixel[0]))
+
+        # Extract the corresponding x values
+        x_values = x[indices]
+
+        # Compute the width as the difference between the maximum and minimum x values
+        width = np.max(x_values) - np.min(x_values)
+        #TODO: find the width of the area between y_bottom and y_up_bottom  
+        pipeline.datamanager.mask[i]['bottom_pixel'] = bottom_pixel
+        #print(bottom_pixel)
+        #pipeline.datamanager.mask[i]['y_up_bottom'] = y_up_bottom
+        pipeline.datamanager.mask[i]['width'] = width
+        #pipeline.datamanager.mask[i]['width'] = 2
+        
+    
+    
+    y_sample_range = 60
+    num_samples = 50
+
+    # filter out out-of-bound indices
+    pipeline.datamanager.surface_detection_camera = pipeline.datamanager.surface_detection_dataset.cameras
+
+    # Initialize an empty numpy array
+    all_points_np = np.empty((0, 3))        
+    
+    camera_list = []
+    image_list = []
+
+    for i, item in enumerate(pipeline.datamanager.mask):
+
+        idx = item['image_idx']
+        bottom_y = int(item['bottom_pixel'][0])
+        bottom_x = int(item['bottom_pixel'][1])
+        width = int(item['width'])
+        camera = pipeline.datamanager.surface_detection_camera[idx]
+        image = pipeline.datamanager.surface_detection_dataset[idx]
+        # Append the camera to the camera_list
+        camera_list.append([camera] * num_samples)
+        image_list.append([image] * num_samples)
+        # Generate an idx array of the same length as points
+        idx_array = np.full((num_samples, 1), idx)
+        # Generate random x coordinates within the width
+        x_samples = np.random.randint(low= bottom_x - width/2, high= bottom_x + width/2, size=num_samples)
+
+        # Generate random y coordinates between y_up_bottom and y_bottom
+        y_samples = np.random.randint(low=bottom_y + y_sample_range -10, high=bottom_y + y_sample_range, size=num_samples)
+        
+
+        # Combine the idx, x and y coordinates into a 2D array
+        points = np.column_stack((idx_array, x_samples, y_samples))
+        #print(points.shape)
+        # Concatenate the points to all_points_np
+        all_points_np = np.concatenate((all_points_np, points), axis=0)
+        #print(all_points_np.shape)
+    # Flatten the camera_list
+    camera_list = [camera for sublist in camera_list for camera in sublist]
+    image_list = [image for sublist in image_list for image in sublist]
+    
+    #print(all_points_np)
+    #raise NotImplementedError
+    
+
+    pipeline.datamanager.ray_indices = torch.from_numpy(all_points_np).int()
+    mask = pipeline.datamanager.ray_indices[:, 1] + y_sample_range < y_outbound
+
+    #print(pipeline.datamanager.ray_indices)
+    #mask = pipeline.datamanager.ray_indices[:, :1] + y_sample_range < y_outbound
+
+    camera_list = list(compress(camera_list, mask))
+
+    camera_list = [camera.to(pipeline.datamanager.device) for camera in camera_list]
+    image_list = list(compress(image_list, mask))
+
+    pipeline.datamanager.surface_detection_ray_generator = RayGenerator_surface_detection(pipeline.datamanager.train_dataset.cameras.to(pipeline.datamanager.device))
+
+    # create ray bundle from ray indices
+    pipeline.datamanager.ray_bundle_surface_detection = pipeline.datamanager.surface_detection_ray_generator(pipeline.datamanager.ray_indices, mask = mask)
+
+    # expand pipeline.datamanager.filtered_cameras to align with pipeline.datamanager.ray_indices
+    #pipeline.datamanager.expanded_cameras = [camera for camera in pipeline.datamanager.filtered_cameras for _ in range(num_samples)]
+    pipeline.datamanager.expanded_cameras = camera_list
+    pipeline.datamanager.filtered_data = image_list
+    #print(pipeline.datamanager.ray_indices.shape, len(pipeline.datamanager.expanded_cameras))
+    #print(pipeline.datamanager.ray_indices.shape, len(camera_list))
+
+    output, colors = pipeline.get_surface_detection(pipeline, pipeline.datamanager.ray_bundle_surface_detection)
     num_image = len(pipeline.datamanager.expanded_cameras)
     assert num_image == len(output) , f"false length"
 
@@ -331,6 +447,10 @@ def plane_estimation(config: TrainerConfig):
     print(f"Saved the aabb to {aabb_path}")
 
     bbox_intersections = derive_nsa(a, b, c, d, vertices)
+    # save the intersections as npy file
+    intersections_path = os.path.join(plot_dir, f"aabb_intersections.npy")
+    np.save(intersections_path, np.array(bbox_intersections))
+    print(f"Saved the aabb intersections to {intersections_path}")
     # plot the intersections in the 3D plot
     for intersection in bbox_intersections:
         ax.scatter(*intersection, color="green")
