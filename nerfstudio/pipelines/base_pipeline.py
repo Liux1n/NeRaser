@@ -538,11 +538,15 @@ class VanillaPipeline(Pipeline):
                         print(e.with_traceback())
                         uv = None
                     for key, val in images_dict.items():
-                        Image.fromarray((val * 255).byte().cpu().numpy()).save(
-                            # output_path / "{0:06d}-{1}.jpg".format(int(camera_indices[0, 0, 0]), key)
-                            # output_path / f"{filename}_{key}.jpg"
-                            output_path / f"{filename}_{key}.png"
-                        )
+                        if key == "depth_raw":
+                            # save the depth_raw as a npy file
+                            np.save(output_path / f"{filename}_{key}.npy", val.cpu().numpy())
+                        else:
+                            Image.fromarray((val * 255).byte().cpu().numpy()).save(
+                                # output_path / "{0:06d}-{1}.jpg".format(int(camera_indices[0, 0, 0]), key)
+                                # output_path / f"{filename}_{key}.jpg"
+                                output_path / f"{filename}_{key}.png"
+                            )
                         if key == "img":  # this is the original + render side by side, render on the right
                             # save the render on its own for easier inpainting
                             img = (val * 255).byte().cpu().numpy()

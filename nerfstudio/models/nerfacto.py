@@ -404,10 +404,16 @@ class NerfactoModel(Model):
             outputs["depth"],
             accumulation=outputs["accumulation"],
         )
+        depth_raw = outputs["depth"]
+
+        # depth.shape: torch.Size([738, 994, 3])
+        # depth_raw.shape: torch.Size([738, 994, 1])
 
         combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
         combined_acc = torch.cat([acc], dim=1)
         combined_depth = torch.cat([depth], dim=1)
+
+        combined_depth_raw = torch.cat([depth_raw], dim=1)
 
         # Switch images from [H, W, C] to [1, C, H, W] for metrics computations
         gt_rgb = torch.moveaxis(gt_rgb, -1, 0)[None, ...]
@@ -421,7 +427,8 @@ class NerfactoModel(Model):
         metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
         metrics_dict["lpips"] = float(lpips)
 
-        images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth}
+        # images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth}
+        images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth, "depth_raw": combined_depth_raw}
 
         for i in range(self.config.num_proposal_iterations):
             key = f"prop_depth_{i}"

@@ -172,19 +172,20 @@ def plane_estimation(config: TrainerConfig):
 
 
     pipeline.datamanager.mask = [item for item in pipeline.datamanager.surface_detection_dataset] 
-    pipeline.datamanager.surface_detection_pixel_sampler = pipeline.datamanager._get_pixel_sampler(pipeline.datamanager.surface_detection_dataset, pipeline.datamanager.config.eval_num_rays_per_batch)
+    # pipeline.datamanager.surface_detection_pixel_sampler = pipeline.datamanager._get_pixel_sampler(pipeline.datamanager.surface_detection_dataset, pipeline.datamanager.config.eval_num_rays_per_batch)
     
     #print(pipeline.datamanager.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
     # white is 1, black is 0
     y_outbound = pipeline.datamanager.mask[0]['mask'].shape[0] # 764
 
+    # HARDCODED for polycam, which means the right direction is actually downwards in the real world
     for i, item in enumerate(pipeline.datamanager.mask):
         mask_array = item['mask'].numpy().squeeze()
         y, x = np.where(mask_array == 0)
         max_y = np.max(y)
-        #max_x = np.max(x)
-        #min_x = np.min(x)
-        #width = max_x - min_x
+        max_x = np.max(x)
+        min_x = np.min(x)
+        width = max_x - min_x
         bottom_pixel = (max_y, x[np.argmax(y)]) # findv the bottom pixel of the mask
         y_lower = bottom_pixel[0] - 5  # Subtract 5 from the y-coordinate of bottom_pixel
          # Find the x-coordinate at this new y-coordinate
