@@ -236,7 +236,7 @@ def plane_estimation(config: TrainerConfig):
         depth_criteria_every_offset = depth_criteria.all(dim=1).squeeze()
         # a new boolean tensor 'depth_safe' with same shape as depth_criteria_every_offset, and depth_safe[i] is True if depth_criteria_every_offset[i] is True when depth_criteria_every_offset[:i+1] are all True
         false_indices = torch.where(depth_criteria_every_offset == False)[0]
-        if len(false_indices) == 0:
+        if len(false_indices) == 0 or false_indices[0] == 0:
             continue
         first_false = torch.where(depth_criteria_every_offset == False)[0][0]
         depth_safe = torch.zeros_like(depth_criteria_every_offset)
@@ -253,7 +253,37 @@ def plane_estimation(config: TrainerConfig):
         corners = corners_reshaped.reshape(-1, 2) # (n_safe, 2)
 
         # randomly sample points in the rectangle area surrounded by corners
-        # n_random = 
+        n_every_offset = 5
+        # first and final pair of corners_reshaped make up the rectangle area
+        left_pair = corners_reshaped[0]
+        right_pair = corners_reshaped[-1]
+        x_safe_min = left_pair[0][1]
+        x_safe_max = right_pair[1][1]
+        y_safe_min = left_pair[0][0]
+        y_safe_max = right_pair[1][0]
+        # bottom_corners = np.array([[min_y, max_x], 
+        #                            [max_y, max_x]])
+
+        # print(f"randomly sampling {n_every_offset} points in the rectangle area surrounded by corners")
+        # print(f"x_safe_min: {x_safe_min}")
+        # print(f"x_safe_max: {x_safe_max}")
+        # print(f"y_safe_min: {y_safe_min}")
+        # print(f"y_safe_max: {y_safe_max}")
+        
+        n_safe_pairs = corners_reshaped.shape[0]
+        n_random = n_safe_pairs * n_every_offset
+        x_random = torch.randint(low=x_safe_min, high=x_safe_max, size=(n_random, 1), device=depth_safe.device)
+        y_random = torch.randint(low=y_safe_min, high=y_safe_max, size=(n_random, 1), device=depth_safe.device)
+        random_points_yx = torch.cat([y_random, x_random], dim=1) # (n_random, 2)
+
+        idx_tensor = torch.full((n_random, 1), image_idx).to(random_points_yx.device)
+        random_points = torch.cat([idx_tensor, random_points_yx], dim=1) # (n_random, 3)
+        ray_bundle_random = pipeline.datamanager.surface_detection_ray_generator(random_points)
+        depth_random, colors_random = pipeline.get_surface_detection(pipeline, ray_bundle_random)
+
+        all_xy = torch.cat([corners, random_points_yx], dim=0) # (n_safe + n_random, 2)
+        all_depth = torch.cat([depth_corners, depth_random.squeeze()], dim=0) # (n_safe + n_random,)
+        all_colors = torch.cat([colors_corners, colors_random], dim=0) # (n_safe + n_random, 3)
 
         camera = pipeline.datamanager.surface_detection_camera[image_idx]
         fx = camera.fx.to(depth_corners.device)
@@ -267,20 +297,26 @@ def plane_estimation(config: TrainerConfig):
         # cy: tensor([371.1886])
         # c2w.shape: torch.Size([3, 4])
 
-        x = corners[:, 1]
-        y = corners[:, 0]
+        # x = corners[:, 1]
+        # y = corners[:, 0]
+        x = all_xy[:, 1]
+        y = all_xy[:, 0]
 
         # xyz in camera coordinates
-        X = (x - cx) * depth_corners / fx
-        Y = -(y - cy) * depth_corners / fy
-        Z = -depth_corners
+        # X = (x - cx) * depth_corners / fx
+        # Y = -(y - cy) * depth_corners / fy
+        # Z = -depth_corners
+        X = (x - cx) * all_depth / fx
+        Y = -(y - cy) * all_depth / fy
+        Z = -all_depth
         
         # Convert to world coordinates
         camera_xyz = torch.stack([X, Y, Z, torch.ones_like(X)], dim=-1)
         world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
 
         world_xyz.append(world_coordinates.cpu().numpy())
-        colors.append(colors_corners.cpu().numpy())
+        # colors.append(colors_corners.cpu().numpy())
+        colors.append(all_colors.cpu().numpy())
 
     world_xyz_np = np.concatenate(world_xyz, axis=0)
     colors_np = np.concatenate(colors, axis=0)

@@ -88,6 +88,7 @@ class RayGenerator_surface_detection(nn.Module):
         y = ray_indices[:, 1]  # row indices
         x = ray_indices[:, 2]  # col indices
         # coords = self.image_coords[y, x]
+        self.image_coords = self.image_coords.to(ray_indices.device)
         coords = self.image_coords[y.long(), x.long()]
     
         #print(mode_surface_detection)
