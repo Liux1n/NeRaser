@@ -137,7 +137,8 @@ def _render_trajectory_video(
                 obb_box = None
                 if crop_data is not None:
                     obb_box = crop_data.obb
-                camera_ray_bundle = cameras.generate_rays(camera_indices=camera_idx, obb_box=obb_box)
+                object_obb = pipeline.datamanager.object_obb
+                camera_ray_bundle = cameras.generate_rays(camera_indices=camera_idx, obb_box=obb_box, object_obb=object_obb)
 
                 if crop_data is not None:
                     with renderers.background_color_override_context(

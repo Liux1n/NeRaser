@@ -292,8 +292,12 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         # Getting Object Occupancy Grid
         print("hello\n")
         print("------------->\n")
-        if self.load_dir is not None:
-            occupancy_path = os.path.join(self.load_dir.parent, "wandb/plots/object_occupancy.npy")
+        # if self.load_dir is not None:
+        if self.load_dir is not None or self.config_path is not None:
+            if self.load_dir is not None:
+                occupancy_path = os.path.join(self.load_dir.parent, "wandb/plots/object_occupancy.npy")
+            else:
+                occupancy_path = os.path.join(self.config_path.parent, "wandb/plots/object_occupancy.npy")
             assert os.path.exists(occupancy_path), f"object_occupancy.npy does not exist in {occupancy_path}, consider running get_plane.py"
             self.object_occupancy = torch.from_numpy(np.load(occupancy_path)).to(self.device)
             print("Loaded object_occupancy from", occupancy_path)

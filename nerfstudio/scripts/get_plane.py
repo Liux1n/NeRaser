@@ -126,7 +126,7 @@ def launch(
 
 def plane_estimation(config: TrainerConfig):
     config.setup(local_rank=0, world_size=1)
-    pipeline = config.pipeline.setup(device = "cuda")
+    pipeline = config.pipeline.setup(device = "cuda", load_dir=config.load_dir)
     # optimizers = Optimizers(config.optimizers.copy(), pipeline.get_param_groups())
     grad_scaler = GradScaler(enabled=True)
 
@@ -177,153 +177,259 @@ def plane_estimation(config: TrainerConfig):
     #print(pipeline.datamanager.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
     # white is 1, black is 0
     y_outbound = pipeline.datamanager.mask[0]['mask'].shape[0] # 764
+    x_outbound = pipeline.datamanager.mask[0]['mask'].shape[1]
 
+    pipeline.datamanager.surface_detection_ray_generator = RayGenerator_surface_detection(pipeline.datamanager.train_dataset.cameras.to(pipeline.datamanager.device))
+    pipeline.datamanager.surface_detection_camera = pipeline.datamanager.surface_detection_dataset.cameras
+
+    world_xyz = []
+    colors = []
     # HARDCODED for polycam, which means the right direction is actually downwards in the real world
     for i, item in enumerate(pipeline.datamanager.mask):
         mask_array = item['mask'].numpy().squeeze()
         y, x = np.where(mask_array == 0)
         max_y = np.max(y)
+        min_y = np.min(y)
         max_x = np.max(x)
         min_x = np.min(x)
-        width = max_x - min_x
-        bottom_pixel = (max_y, x[np.argmax(y)]) # findv the bottom pixel of the mask
-        y_lower = bottom_pixel[0] - 5  # Subtract 5 from the y-coordinate of bottom_pixel
-         # Find the x-coordinate at this new y-coordinate
+        # width = max_x - min_x
+        bottom_width = max_y - min_y # Due to polycam the bottom is usually on the right side of the image
+        height = max_x - min_x
+        offset_proportion = 0.1
+        offset = int(height * offset_proportion)
+        offset_shaped = np.array([[0, offset], 
+                                  [0, offset]])
+        bottom_corners = np.array([[min_y, max_x], 
+                                   [max_y, max_x]])
+        # bottom_corners_init = bottom_corners + offset_shaped
 
-        above_bottom_pixel = (y_lower, bottom_pixel[1])
-    
-        # Find the indices where y is between y_up_bottom and y_bottom
-        indices = np.where((y >= above_bottom_pixel[0]) & (y <= bottom_pixel[0]))
+        max_num_offset = (x_outbound - max_x) // offset
+        # create a new np.array 'corner_candidates' with shape (max_num_offset, 2, 2) where corner_candidates[i] is bottom_corners + i * offset_shaped
+        # avoid using for loop
+        corner_candidates = bottom_corners + np.arange(1, max_num_offset).reshape(-1, 1, 1) * offset_shaped
+        # corner_candidates.shape: (31, 2, 2)
 
-        # Extract the corresponding x values
-        x_values = x[indices]
+        image_idx = item['image_idx']
+        num_candidates = corner_candidates.shape[0] * 2
+        idx_array = np.full((num_candidates, 1), image_idx)
 
-        # Compute the width as the difference between the maximum and minimum x values
-        width = np.max(x_values) - np.min(x_values)
-        #TODO: find the width of the area between y_bottom and y_up_bottom  
-        pipeline.datamanager.mask[i]['bottom_pixel'] = bottom_pixel
-        #print(bottom_pixel)
-        #pipeline.datamanager.mask[i]['y_up_bottom'] = y_up_bottom
-        pipeline.datamanager.mask[i]['width'] = width
-        #pipeline.datamanager.mask[i]['width'] = 2
+        candidate_points = np.hstack((idx_array, corner_candidates.reshape(num_candidates, 2)))
+        ray_indices = torch.from_numpy(candidate_points).int() # ray_indices.shape: torch.Size([62, 3])
+        # create ray bundle from ray indices
+        ray_bundle_corner_candidates = pipeline.datamanager.surface_detection_ray_generator(ray_indices)
+        depth_candidates, colors_candidates = pipeline.get_surface_detection(pipeline, ray_bundle_corner_candidates)
+        # depth_candidates.shape: torch.Size([62, 1])
+        # colors_candidates.shape: torch.Size([62, 3])
+
+        depth_candidates_reshaped = depth_candidates.reshape(corner_candidates.shape[0], 2, 1) # (31, 2, 1)
+        colors_candidates_reshaped = colors_candidates.reshape(corner_candidates.shape[0], 2, 3) # (31, 2, 3)
         
-    
-    
-    y_sample_range = 60
-    num_samples = 50
+        depth_diff = depth_candidates_reshaped[1:] - depth_candidates_reshaped[:-1] # (30, 2, 1)
+        # print(f"depth_diff < 0: {depth_diff < 0}") # looks reliable
+        # print(f"depth_diff[1:] > depth_diff[:-1]: {depth_diff[1:] > depth_diff[:-1]}") # turned out to contain many Falses even at the start
 
-    # filter out out-of-bound indices
-    pipeline.datamanager.surface_detection_camera = pipeline.datamanager.surface_detection_dataset.cameras
+        # depth_criteria = (depth_diff < 0) * torch.cat([torch.tensor([[[True], 
+        #                                                               [True]]], device=depth_diff.device), depth_diff[1:] > depth_diff[:-1]], dim=0)
+        depth_criteria = depth_diff < 0
+        # depth_criteria.shape: torch.Size([30, 2, 1])
 
-    # Initialize an empty numpy array
-    all_points_np = np.empty((0, 3))        
-    
-    camera_list = []
-    image_list = []
+        depth_criteria_every_offset = depth_criteria.all(dim=1).squeeze()
+        # a new boolean tensor 'depth_safe' with same shape as depth_criteria_every_offset, and depth_safe[i] is True if depth_criteria_every_offset[i] is True when depth_criteria_every_offset[:i+1] are all True
+        false_indices = torch.where(depth_criteria_every_offset == False)[0]
+        if len(false_indices) == 0:
+            continue
+        first_false = torch.where(depth_criteria_every_offset == False)[0][0]
+        depth_safe = torch.zeros_like(depth_criteria_every_offset)
+        depth_safe[:first_false] = True # depth_safe.shape: torch.Size([30])
+        # concat a True at the start of depth_safe
+        depth_safe = torch.cat([torch.tensor([True], device=depth_safe.device), depth_safe], dim=0) # depth_safe.shape: torch.Size([31])
 
-    for i, item in enumerate(pipeline.datamanager.mask):
+        depth_reshaped = depth_candidates_reshaped[depth_safe] # (n_safe_pairs, 2, 1)
+        depth_corners = depth_reshaped.reshape(-1) # (n_safe,)
+        colors_reshaped = colors_candidates_reshaped[depth_safe] # (n_safe_pairs, 2, 3)
+        colors_corners = colors_reshaped.reshape(-1, 3) # (n_safe, 3)
+        corner_candidates_torch = torch.from_numpy(corner_candidates).to(depth_safe.device) # (31, 2, 2)
+        corners_reshaped = corner_candidates_torch[depth_safe] # (n_safe_pairs, 2, 2)
+        corners = corners_reshaped.reshape(-1, 2) # (n_safe, 2)
 
-        idx = item['image_idx']
-        bottom_y = int(item['bottom_pixel'][0])
-        bottom_x = int(item['bottom_pixel'][1])
-        width = int(item['width'])
-        camera = pipeline.datamanager.surface_detection_camera[idx]
-        image = pipeline.datamanager.surface_detection_dataset[idx]
-        # Append the camera to the camera_list
-        camera_list.append([camera] * num_samples)
-        image_list.append([image] * num_samples)
-        # Generate an idx array of the same length as points
-        idx_array = np.full((num_samples, 1), idx)
-        # Generate random x coordinates within the width
-        x_samples = np.random.randint(low= bottom_x - width/2, high= bottom_x + width/2, size=num_samples)
+        # randomly sample points in the rectangle area surrounded by corners
+        # n_random = 
 
-        # Generate random y coordinates between y_up_bottom and y_bottom
-        y_samples = np.random.randint(low=bottom_y + y_sample_range -10, high=bottom_y + y_sample_range, size=num_samples)
+        camera = pipeline.datamanager.surface_detection_camera[image_idx]
+        fx = camera.fx.to(depth_corners.device)
+        fy = camera.fy.to(depth_corners.device)
+        cx = camera.cx.to(depth_corners.device)
+        cy = camera.cy.to(depth_corners.device)
+        c2w = camera.camera_to_worlds.to(depth_corners.device)
+        # fx: tensor([737.9322])
+        # fy: tensor([737.9322])
+        # cx: tensor([499.0845])
+        # cy: tensor([371.1886])
+        # c2w.shape: torch.Size([3, 4])
+
+        x = corners[:, 1]
+        y = corners[:, 0]
+
+        # xyz in camera coordinates
+        X = (x - cx) * depth_corners / fx
+        Y = -(y - cy) * depth_corners / fy
+        Z = -depth_corners
         
+        # Convert to world coordinates
+        camera_xyz = torch.stack([X, Y, Z, torch.ones_like(X)], dim=-1)
+        world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
 
-        # Combine the idx, x and y coordinates into a 2D array
-        points = np.column_stack((idx_array, x_samples, y_samples))
-        #print(points.shape)
-        # Concatenate the points to all_points_np
-        all_points_np = np.concatenate((all_points_np, points), axis=0)
-        #print(all_points_np.shape)
-    # Flatten the camera_list
-    camera_list = [camera for sublist in camera_list for camera in sublist]
-    image_list = [image for sublist in image_list for image in sublist]
-    
-    #print(all_points_np)
-    #raise NotImplementedError
-    
+        world_xyz.append(world_coordinates.cpu().numpy())
+        colors.append(colors_corners.cpu().numpy())
 
-    pipeline.datamanager.ray_indices = torch.from_numpy(all_points_np).int()
-    mask = pipeline.datamanager.ray_indices[:, 1] + y_sample_range < y_outbound
+    world_xyz_np = np.concatenate(world_xyz, axis=0)
+    colors_np = np.concatenate(colors, axis=0)
 
-    #print(pipeline.datamanager.ray_indices)
-    #mask = pipeline.datamanager.ray_indices[:, :1] + y_sample_range < y_outbound
-
-    camera_list = list(compress(camera_list, mask))
-
-    camera_list = [camera.to(pipeline.datamanager.device) for camera in camera_list]
-    image_list = list(compress(image_list, mask))
-
-    pipeline.datamanager.surface_detection_ray_generator = RayGenerator_surface_detection(pipeline.datamanager.train_dataset.cameras.to(pipeline.datamanager.device))
-
-    # create ray bundle from ray indices
-    pipeline.datamanager.ray_bundle_surface_detection = pipeline.datamanager.surface_detection_ray_generator(pipeline.datamanager.ray_indices, mask = mask)
-
-    # expand pipeline.datamanager.filtered_cameras to align with pipeline.datamanager.ray_indices
-    #pipeline.datamanager.expanded_cameras = [camera for camera in pipeline.datamanager.filtered_cameras for _ in range(num_samples)]
-    pipeline.datamanager.expanded_cameras = camera_list
-    pipeline.datamanager.filtered_data = image_list
-    #print(pipeline.datamanager.ray_indices.shape, len(pipeline.datamanager.expanded_cameras))
-    #print(pipeline.datamanager.ray_indices.shape, len(camera_list))
-
-    output, colors = pipeline.get_surface_detection(pipeline, pipeline.datamanager.ray_bundle_surface_detection)
-    num_image = len(pipeline.datamanager.expanded_cameras)
-    assert num_image == len(output) , f"false length"
-
-    print(f"output.shape: {output.shape}")
-    print(f"colors.shape: {colors.shape}")
-    print(f"num_image: {num_image}")
-    colors = colors.cpu()
     # find the median of each column
-    median = np.median(colors, axis=0) # (3,)
-    # find the covariance matrix of the colors values
-    cov = np.cov(colors.T) # (3, 3)
+    median = np.median(colors_np, axis=0) # (3,)
+    # find the covariance matrix of the colors_np values
+    cov = np.cov(colors_np.T) # (3, 3)
     # inverse of the covariance matrix
     cov_inv = np.linalg.inv(cov) # (3, 3)
     # find the mahalanobis distance of each point from the median
-    mahalanobis = scipy.spatial.distance.cdist(colors, [median], metric='mahalanobis', VI=cov_inv) # (N, 1)
+    mahalanobis = scipy.spatial.distance.cdist(colors_np, [median], metric='mahalanobis', VI=cov_inv) # (N, 1)
     mahalanobis_similarity = 1 / (1 + mahalanobis) # (N, 1)
 
-    world_xyz = []
-    for i in range(num_image):
-        
-        fx = pipeline.datamanager.expanded_cameras[i].fx
-        fy = pipeline.datamanager.expanded_cameras[i].fy
-        cx = pipeline.datamanager.expanded_cameras[i].cx
-        cy = pipeline.datamanager.expanded_cameras[i].cy
-        c2w = pipeline.datamanager.expanded_cameras[i].camera_to_worlds
-        depth = output[i].to(fx.device)
-        y = pipeline.datamanager.ray_indices[i][1]
-        x = pipeline.datamanager.ray_indices[i][2]
-        # xyz in camera coordinates
-        X = (x - cx) * depth / fx
-        # Y = (y - cy) * depth / fy
-        # Z = depth
-        Y = -(y - cy) * depth / fy
-        Z = -depth
-        # Convert to world coordinates
-        camera_xyz = torch.stack([X, Y, Z, torch.ones_like(X)], dim=-1)
-        c2w = c2w.to(camera_xyz.device)
-        #world_xyz.append((c2w @ camera_xyz.T).T[..., :3])
-        world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
-        world_xyz.append(world_coordinates)
+    #     above_bottom_pixel = (y_lower, bottom_pixel[1])
     
-    print(len(world_xyz))
-    # calculate the plane equation using linear regression
-    # Flatten the world_xyz list and convert it to a numpy array
-    world_xyz_np = np.concatenate([xyz.cpu().numpy() for xyz in world_xyz], axis=0)
+    #     # Find the indices where y is between y_up_bottom and y_bottom
+    #     indices = np.where((y >= above_bottom_pixel[0]) & (y <= bottom_pixel[0]))
+
+    #     # Extract the corresponding x values
+    #     x_values = x[indices]
+
+    #     # Compute the width as the difference between the maximum and minimum x values
+    #     width = np.max(x_values) - np.min(x_values)
+    #     #TODO: find the width of the area between y_bottom and y_up_bottom  
+    #     pipeline.datamanager.mask[i]['bottom_pixel'] = bottom_pixel
+    #     #print(bottom_pixel)
+    #     #pipeline.datamanager.mask[i]['y_up_bottom'] = y_up_bottom
+    #     pipeline.datamanager.mask[i]['width'] = width
+    #     #pipeline.datamanager.mask[i]['width'] = 2
+        
+    
+    
+    # y_sample_range = 60
+    # num_samples = 50
+
+    # # filter out out-of-bound indices
+    # pipeline.datamanager.surface_detection_camera = pipeline.datamanager.surface_detection_dataset.cameras
+
+    # # Initialize an empty numpy array
+    # all_points_np = np.empty((0, 3))        
+    
+    # camera_list = []
+    # image_list = []
+
+    # for i, item in enumerate(pipeline.datamanager.mask):
+
+    #     idx = item['image_idx']
+    #     bottom_y = int(item['bottom_pixel'][0])
+    #     bottom_x = int(item['bottom_pixel'][1])
+    #     width = int(item['width'])
+    #     camera = pipeline.datamanager.surface_detection_camera[idx]
+    #     image = pipeline.datamanager.surface_detection_dataset[idx]
+    #     # Append the camera to the camera_list
+    #     camera_list.append([camera] * num_samples)
+    #     image_list.append([image] * num_samples)
+    #     # Generate an idx array of the same length as points
+    #     idx_array = np.full((num_samples, 1), idx)
+    #     # Generate random x coordinates within the width
+    #     x_samples = np.random.randint(low= bottom_x - width/2, high= bottom_x + width/2, size=num_samples)
+
+    #     # Generate random y coordinates between y_up_bottom and y_bottom
+    #     y_samples = np.random.randint(low=bottom_y + y_sample_range -10, high=bottom_y + y_sample_range, size=num_samples)
+        
+
+    #     # Combine the idx, x and y coordinates into a 2D array
+    #     points = np.column_stack((idx_array, x_samples, y_samples)) # (num_samples, 3)
+    #     #print(points.shape)
+    #     # Concatenate the points to all_points_np
+    #     all_points_np = np.concatenate((all_points_np, points), axis=0)
+    #     #print(all_points_np.shape)
+    # # Flatten the camera_list
+    # camera_list = [camera for sublist in camera_list for camera in sublist]
+    # image_list = [image for sublist in image_list for image in sublist]
+    
+    # #print(all_points_np)
+    # #raise NotImplementedError
+    
+
+    # pipeline.datamanager.ray_indices = torch.from_numpy(all_points_np).int()
+    # mask = pipeline.datamanager.ray_indices[:, 1] + y_sample_range < y_outbound
+
+    # #print(pipeline.datamanager.ray_indices)
+    # #mask = pipeline.datamanager.ray_indices[:, :1] + y_sample_range < y_outbound
+
+    # camera_list = list(compress(camera_list, mask))
+
+    # camera_list = [camera.to(pipeline.datamanager.device) for camera in camera_list]
+    # image_list = list(compress(image_list, mask))
+
+    # pipeline.datamanager.surface_detection_ray_generator = RayGenerator_surface_detection(pipeline.datamanager.train_dataset.cameras.to(pipeline.datamanager.device))
+
+    # # create ray bundle from ray indices
+    # pipeline.datamanager.ray_bundle_surface_detection = pipeline.datamanager.surface_detection_ray_generator(pipeline.datamanager.ray_indices, mask = mask)
+
+    # # expand pipeline.datamanager.filtered_cameras to align with pipeline.datamanager.ray_indices
+    # #pipeline.datamanager.expanded_cameras = [camera for camera in pipeline.datamanager.filtered_cameras for _ in range(num_samples)]
+    # pipeline.datamanager.expanded_cameras = camera_list
+    # pipeline.datamanager.filtered_data = image_list
+    # #print(pipeline.datamanager.ray_indices.shape, len(pipeline.datamanager.expanded_cameras))
+    # #print(pipeline.datamanager.ray_indices.shape, len(camera_list))
+
+    # output, colors = pipeline.get_surface_detection(pipeline, pipeline.datamanager.ray_bundle_surface_detection)
+    # num_image = len(pipeline.datamanager.expanded_cameras)
+    # assert num_image == len(output) , f"false length"
+
+    # print(f"output.shape: {output.shape}")
+    # print(f"colors.shape: {colors.shape}")
+    # print(f"num_image: {num_image}")
+    # colors = colors.cpu()
+    # # find the median of each column
+    # median = np.median(colors, axis=0) # (3,)
+    # # find the covariance matrix of the colors values
+    # cov = np.cov(colors.T) # (3, 3)
+    # # inverse of the covariance matrix
+    # cov_inv = np.linalg.inv(cov) # (3, 3)
+    # # find the mahalanobis distance of each point from the median
+    # mahalanobis = scipy.spatial.distance.cdist(colors, [median], metric='mahalanobis', VI=cov_inv) # (N, 1)
+    # mahalanobis_similarity = 1 / (1 + mahalanobis) # (N, 1)
+
+    # world_xyz = []
+    # for i in range(num_image):
+        
+    #     fx = pipeline.datamanager.expanded_cameras[i].fx
+    #     fy = pipeline.datamanager.expanded_cameras[i].fy
+    #     cx = pipeline.datamanager.expanded_cameras[i].cx
+    #     cy = pipeline.datamanager.expanded_cameras[i].cy
+    #     c2w = pipeline.datamanager.expanded_cameras[i].camera_to_worlds
+    #     depth = output[i].to(fx.device)
+    #     y = pipeline.datamanager.ray_indices[i][1]
+    #     x = pipeline.datamanager.ray_indices[i][2]
+    #     # xyz in camera coordinates
+    #     X = (x - cx) * depth / fx
+    #     # Y = (y - cy) * depth / fy
+    #     # Z = depth
+    #     Y = -(y - cy) * depth / fy
+    #     Z = -depth
+    #     # Convert to world coordinates
+    #     camera_xyz = torch.stack([X, Y, Z, torch.ones_like(X)], dim=-1)
+    #     c2w = c2w.to(camera_xyz.device)
+    #     #world_xyz.append((c2w @ camera_xyz.T).T[..., :3])
+    #     world_coordinates = (c2w @ camera_xyz.T).T[..., :3]
+    #     world_xyz.append(world_coordinates)
+    
+    # print(len(world_xyz))
+    # # calculate the plane equation using linear regression
+    # # Flatten the world_xyz list and convert it to a numpy array
+    # world_xyz_np = np.concatenate([xyz.cpu().numpy() for xyz in world_xyz], axis=0)
+
     # Create a LinearRegression object
     #reg = LinearRegression()
     # reg = TheilSenRegressor(random_state=0)
@@ -331,10 +437,12 @@ def plane_estimation(config: TrainerConfig):
     reg = HuberRegressor()
 
     # filter out points with mahalanobis similarity less than some threshold
+    # similarity_threshold = 0.6
     similarity_threshold = 0.6
+    n_points = world_xyz_np.shape[0]
     world_xyz_np = world_xyz_np[mahalanobis_similarity.flatten() > similarity_threshold]
     mahalanobis_similarity = mahalanobis_similarity[mahalanobis_similarity.flatten() > similarity_threshold]
-    print(f"Filtering out points with color mahalanobis similarity less than {similarity_threshold}, number of remaining points: {world_xyz_np.shape[0]}")
+    print(f"Filtering out points with color mahalanobis similarity less than {similarity_threshold}, number of remaining points: {world_xyz_np.shape[0]}/{n_points}")
 
     # Fit the model to the data
     # reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2])
@@ -436,7 +544,7 @@ def plane_estimation(config: TrainerConfig):
     print(f"Saved the plane samples to {samples_path}")
     # save the colors of the points as npy file
     colors_path = os.path.join(plot_dir, f"sample_colors.npy")
-    np.save(colors_path, colors)
+    np.save(colors_path, colors_np)
     print(f"Saved the colors of the points to {colors_path}")
     # save the coefficients of the plane equation as npy file
     plane_path = os.path.join(plot_dir, f"plane_coefficients.npy")

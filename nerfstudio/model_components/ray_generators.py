@@ -80,7 +80,8 @@ class RayGenerator_surface_detection(nn.Module):
         Args:
             ray_indices: Contains camera, row, and col indices for target rays.
         """
-        mask = mask
+        if mask is None:
+            mask = torch.ones(ray_indices.shape[0], dtype=torch.bool)
 
         ray_indices = ray_indices[mask]
         c = ray_indices[:, 0]  # camera indices
