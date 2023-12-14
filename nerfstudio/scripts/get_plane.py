@@ -571,10 +571,11 @@ def plane_estimation(config: TrainerConfig):
     # world_xyz_np = np.concatenate([xyz.cpu().numpy() for xyz in world_xyz], axis=0)
 
     # Create a LinearRegression object
-    #reg = LinearRegression()
+    # reg = LinearRegression()
     # reg = TheilSenRegressor(random_state=0)
     # use a Huber regressor
-    reg = HuberRegressor()
+    # reg = HuberRegressor()
+    reg = HuberRegressor(fit_intercept=False)
 
     # filter out points with mahalanobis similarity less than some threshold
     # similarity_threshold = 0.6
@@ -585,14 +586,18 @@ def plane_estimation(config: TrainerConfig):
     print(f"Filtering out points with color mahalanobis similarity less than {similarity_threshold}, number of remaining points: {world_xyz_np.shape[0]}/{n_points}")
 
     # Fit the model to the data
+    # ax + by + cz + d = 0
     # reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2])
-    reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2], sample_weight=mahalanobis_similarity.flatten())
+    # reg.fit(world_xyz_np[:, :2], world_xyz_np[:, 2], sample_weight=mahalanobis_similarity.flatten())
+    reg.fit(world_xyz_np, np.ones(world_xyz_np.shape[0]), sample_weight=mahalanobis_similarity.flatten())
     print(f"Used {reg.__class__.__name__} weighted by mahalanobis similarity")
 
     # The coefficients a, b are in reg.coef_, and the intercept d is in reg.intercept_
-    a, b = reg.coef_
-    d = reg.intercept_
-    c = -1
+    # a, b = reg.coef_
+    # d = reg.intercept_
+    # c = -1
+    a, b, c = reg.coef_
+    d = -1
 
     # vertices = pipeline.datamanager.vertices
     # print("Vertices of bbox\n")

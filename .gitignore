@@ -195,6 +195,7 @@ my_scripts/
 nsa_identification.py
 object_occupancy.*
 interpolated_depth_average.png
+plots*/
 
 # add by liuxin
 occupancy.ipynb

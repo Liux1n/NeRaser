@@ -368,24 +368,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         if normalized_normal[2] < 0:
             normalized_normal = -normalized_normal
         
-        # convert all self.occupied_coordinates to a new coordinate system where the z-axis is the normal of the plane, and the xy-plane is the plane specified by the plane coefficients ax + by + cz + d = 0
-        # Then, by finding the min and max points of the new self.occupied_coordinates, and clamping the z component to be above 1, we can get the above-plane bbox
-        # First, find the rotation matrix that rotates the z-axis to the normal of the plane
-        unit_z = torch.tensor([0., 0., 1.], dtype=normalized_normal.dtype)
-        R = self.get_rotation_aligning_vectors(unit_z, normalized_normal)
-        R = R.to(self.occupied_coordinates.dtype).to(self.device)
-        # Then, find the translation vector that translates the origin to the plane
-        T = -d * normalized_normal
-        T = T.to(self.occupied_coordinates.dtype).to(self.device)
-        # Then, find the new self.occupied_coordinates
-        self.occupied_coordinates_planealigned = torch.matmul(R.inverse(), self.occupied_coordinates) + T.view(3, 1)
-        # get the min and max points of the new self.occupied_coordinates
-        min_point_planealigned = torch.min(self.occupied_coordinates_planealigned, dim=1)[0]
-        max_point_planealigned = torch.max(self.occupied_coordinates_planealigned, dim=1)[0]
-        # clamp the z component to be above 0
-        min_point_planealigned[2] = torch.max(min_point_planealigned[2], torch.tensor(0.))
-        max_point_planealigned[2] = torch.max(max_point_planealigned[2], torch.tensor(0.))
-        
+        max_point_planealigned, min_point_planealigned, R, T = self.transform_to_planealigned(normalized_normal, d)
+
         # give a small offset to make the obb really above the plane
         object_height = torch.abs(max_point_planealigned[2] - min_point_planealigned[2])
         offset = object_height * offset_proportion
@@ -408,6 +392,31 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         print(f"obb_T: {obb_T}")
 
         return OrientedBox(R=obb_R, T=obb_T, S=obb_S)
+    
+    def transform_to_planealigned(self, normalized_normal, d):
+        # convert all self.occupied_coordinates to a new coordinate system where the z-axis is the normal of the plane, and the xy-plane is the plane specified by the plane coefficients ax + by + cz + d = 0
+        # Then, by finding the min and max points of the new self.occupied_coordinates, and clamping the z component to be above 1, we can get the above-plane bbox
+        # First, find the rotation matrix that rotates the z-axis to the normal of the plane
+        unit_z = torch.tensor([0., 0., 1.], dtype=normalized_normal.dtype)
+        R = self.get_rotation_aligning_vectors(unit_z, normalized_normal)
+        R = R.to(self.occupied_coordinates.dtype).to(self.device)
+        # Then, find the translation vector that translates the origin to the plane
+        T = -d * normalized_normal
+        T = T.to(self.occupied_coordinates.dtype).to(self.device)
+        # Then, find the new self.occupied_coordinates
+        self.occupied_coordinates_planealigned = torch.matmul(R.inverse(), self.occupied_coordinates) + T.view(3, 1)
+        # get the min and max points of the new self.occupied_coordinates
+        min_point_planealigned = torch.min(self.occupied_coordinates_planealigned, dim=1)[0]
+        max_point_planealigned = torch.max(self.occupied_coordinates_planealigned, dim=1)[0]
+        # clamp the z component to be above 0
+        min_point_planealigned[2] = torch.max(min_point_planealigned[2], torch.tensor(0.))
+        max_point_planealigned[2] = torch.max(max_point_planealigned[2], torch.tensor(0.))
+
+        if min_point_planealigned[2] == 0 and max_point_planealigned[2] == 0:
+            print("Object rotated below the plane! Trying reversing the normal of the plane...")
+            return self.transform_to_planealigned(-normalized_normal, d)
+
+        return min_point_planealigned, max_point_planealigned, R, T
 
     def get_rotation_aligning_vectors(self, source_vector, target_vector):
         # source_vector and target_vector are both normalized
