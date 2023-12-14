@@ -173,8 +173,10 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         config_path: Optional[Path] = None, # added for eval.py
         **kwargs,
     ):
-        self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
-        # self.dataset_type: Type[TDataset] = DepthDataset # HARDCODED for depth-nerfacto TODO: change this
+        if load_dir is not None:
+            self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
+        else:
+            self.dataset_type: Type[TDataset] = DepthDataset
         self.config = config
         self.device = device
         self.world_size = world_size
