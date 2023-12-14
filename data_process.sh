@@ -51,8 +51,6 @@ for (( i=0; i<${#dirs[@]}; i++ )); do
     fi
 done
 
-
-
 # Ask the user to choose a directory
 echo "Enter the number of the dataset you want to generate/regenerate mask or enter 'all' to generate masks for all datasets:"
 read dir_num
@@ -62,18 +60,18 @@ if [[ $dir_num == "all" ]]; then
     echo "You chose to process all directories."
     # Loop over all directories
     for chosen_dir in "${dirs[@]}"; do
-        if [ -d $chosen_dir/masks_2 ]
-        then
-            echo "Masks already exist. Skipping."
-        else
-            python $path_segmentation/interactive_gui.py \
-            --images $chosen_dir/images \
-            --output_dir $chosen_dir \
-            --prop_model $path_segmentation/saves/propagation_model.pth \
-            --fusion_model $path_segmentation/saves/fusion.pth \
-            --s2m_model $path_segmentation/saves/s2m.pth \
-            --fbrs_model $path_segmentation/saves/fbrs.pth
-        fi
+        # if [ -d $chosen_dir/masks_2 ]
+        # then
+        #     echo "Masks already exist. Skipping."
+        # else
+        python $path_segmentation/interactive_gui.py \
+        --images $chosen_dir/images \
+        --output_dir $chosen_dir \
+        --prop_model $path_segmentation/saves/propagation_model.pth \
+        --fusion_model $path_segmentation/saves/fusion.pth \
+        --s2m_model $path_segmentation/saves/s2m.pth \
+        --fbrs_model $path_segmentation/saves/fbrs.pth
+        # fi
 
         echo "Modifying transforms.json..."
         python $path_segmentation/add_mask.py --data_dir $chosen_dir
@@ -93,18 +91,18 @@ else
 
     # Get the chosen directory
     chosen_dir=${dirs[$dir_num]}
-    if [ -d $chosen_dir/masks_2 ]
-    then
-        echo "Masks already exist. Skipping."
-    else
-        python $path_segmentation/interactive_gui.py \
-        --images $chosen_dir/images \
-        --output_dir $chosen_dir \
-        --prop_model $path_segmentation/saves/propagation_model.pth \
-        --fusion_model $path_segmentation/saves/fusion.pth \
-        --s2m_model $path_segmentation/saves/s2m.pth \
-        --fbrs_model $path_segmentation/saves/fbrs.pth
-    fi
+    # if [ -d $chosen_dir/masks_2 ]
+    # then
+    #     echo "Masks already exist. Skipping."
+    # else
+    python $path_segmentation/interactive_gui.py \
+    --images $chosen_dir/images \
+    --output_dir $chosen_dir \
+    --prop_model $path_segmentation/saves/propagation_model.pth \
+    --fusion_model $path_segmentation/saves/fusion.pth \
+    --s2m_model $path_segmentation/saves/s2m.pth \
+    --fbrs_model $path_segmentation/saves/fbrs.pth
+    # fi
 
     echo "Modifying transforms.json..."
     python $path_segmentation/add_mask.py --data_dir $chosen_dir
@@ -113,60 +111,6 @@ else
     #process_directory $chosen_dir
 fi
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# # Ask the user to choose a directory
-# echo "Enter the number of the dataset you want to generate/regenerate mask:"
-# read dir_num
-
-# # Subtract 1 because arrays are 0-indexed
-# dir_num=$((dir_num-1))
-
-# # Check if the chosen number is valid
-# if [[ dir_num -lt 0 || dir_num -ge ${#dirs[@]} ]]; then
-#     echo "Invalid number. Exiting."
-#     exit 1
-# fi
-
-# # Get the chosen directory
-# chosen_dir=${dirs[$dir_num]}
-
-# echo "You chose to process: $chosen_dir"
-# echo "..."
-
-# if [ -d $chosen_dir/masks_2 ]
-# then
-#     echo "Masks already exist. Skipping."
-# else
-#     python $path_segmentation/interactive_gui.py \
-#     --images $chosen_dir/images \
-#     --output_dir $chosen_dir \
-#     --prop_model $path_segmentation/saves/propagation_model.pth \
-#     --fusion_model $path_segmentation/saves/fusion.pth \
-#     --s2m_model $path_segmentation/saves/s2m.pth \
-#     --fbrs_model $path_segmentation/saves/fbrs.pth
-# fi
-
-# echo "Modifying transforms.json..."
-# python $path_segmentation/add_mask.py --data_dir $chosen_dir
-
-# echo "Done!"
 
 
 
