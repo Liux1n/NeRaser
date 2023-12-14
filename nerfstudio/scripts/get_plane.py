@@ -71,6 +71,9 @@ import matplotlib.pyplot as plt
 # from mpl_toolkits.mplot3d import Axes3D
 from itertools import compress
 
+from nerfstudio.data.utils.data_utils import get_depth_image_from_path
+from nerfstudio.data.datasets.depth_dataset import DepthDataset
+
 
 DEFAULT_TIMEOUT = timedelta(minutes=30)
 
@@ -124,6 +127,12 @@ def launch(
         finally:
             profiler.flush_profiler(config.logging)
 
+def transform_yx(yx, transform, center):
+    yx = yx - center
+    yx = (transform @ yx.T).T
+    yx = yx + center
+    return yx
+
 def plane_estimation(config: TrainerConfig):
     config.setup(local_rank=0, world_size=1)
     pipeline = config.pipeline.setup(device = "cuda", load_dir=config.load_dir)
@@ -168,16 +177,19 @@ def plane_estimation(config: TrainerConfig):
     # TODO: avoid "pipeline." prefix
    
     #pipeline.datamanager.surface_detection_dataset = pipeline.datamanager.eval_dataset
-    pipeline.datamanager.surface_detection_dataset = pipeline.datamanager.train_dataset
-
+    # pipeline.datamanager.surface_detection_dataset = pipeline.datamanager.train_dataset
+    # force the dataset type to be DepthDataset
+    pipeline.datamanager.dataset_type = DepthDataset
+    pipeline.datamanager.surface_detection_dataset = pipeline.datamanager.create_train_dataset()
 
     pipeline.datamanager.mask = [item for item in pipeline.datamanager.surface_detection_dataset] 
     # pipeline.datamanager.surface_detection_pixel_sampler = pipeline.datamanager._get_pixel_sampler(pipeline.datamanager.surface_detection_dataset, pipeline.datamanager.config.eval_num_rays_per_batch)
     
-    #print(pipeline.datamanager.mask[0]['mask'].shape) # torch.Size([764, 1015, 1])
     # white is 1, black is 0
-    y_outbound = pipeline.datamanager.mask[0]['mask'].shape[0] # 764
+    y_outbound = pipeline.datamanager.mask[0]['mask'].shape[0]
     x_outbound = pipeline.datamanager.mask[0]['mask'].shape[1]
+    # y_outbound: 738
+    # x_outbound: 994
 
     pipeline.datamanager.surface_detection_ray_generator = RayGenerator_surface_detection(pipeline.datamanager.train_dataset.cameras.to(pipeline.datamanager.device))
     pipeline.datamanager.surface_detection_camera = pipeline.datamanager.surface_detection_dataset.cameras
@@ -193,58 +205,111 @@ def plane_estimation(config: TrainerConfig):
         max_x = np.max(x)
         min_x = np.min(x)
 
+        image_idx = item['image_idx']
+        camera = pipeline.datamanager.surface_detection_camera[image_idx]
         # decide which direction (out of "down", "up", "left", "right") to search for the bottom pixel
         # read depth image
-        """
-        def get_metadata(self, data: Dict) -> Dict:
-            if self.depth_filenames is None:
-                return {"depth_image": self.depths[data["image_idx"]]}
+        depth_filepath = pipeline.datamanager.surface_detection_dataset.depth_filenames[item['image_idx']]
+        depth_height = int(camera.height)
+        depth_width = int(camera.width)
+        # depth_height: 738
+        # depth_width: 994
+        depth_image = get_depth_image_from_path(filepath=depth_filepath, height=depth_height, width=depth_width, scale_factor=1.0)
+        # depth_image.shape: torch.Size([738, 994, 1])
+        # split depth_image into 9 parts using max_y, min_y, max_x, min_x, and extract the "up", "down", "left", "right" parts
+        depth_image_up = depth_image[:min_y, min_x:max_x, :]
+        depth_image_down = depth_image[max_y:, min_x:max_x, :]
+        depth_image_left = depth_image[min_y:max_y, :min_x, :]
+        depth_image_right = depth_image[min_y:max_y, max_x:, :]
+        # find the mean depth of each part
+        depth_mean_up = depth_image_up.mean()
+        depth_mean_down = depth_image_down.mean()
+        depth_mean_left = depth_image_left.mean()
+        depth_mean_right = depth_image_right.mean()
+        # find the part with the smallest mean depth (in case there is NaN, replace it with torch.inf)
+        depth_means = torch.tensor([depth_mean_up, depth_mean_down, depth_mean_left, depth_mean_right])
+        depth_means[torch.isnan(depth_means)] = torch.inf
+        downward_direction_index = int(torch.argmin(depth_means).cpu().numpy())
+        direction_dict = {0: "up", 1: "down", 2: "left", 3: "right"}
+        downward_direction = direction_dict[downward_direction_index]
+        print(f"downward_direction: {downward_direction}")
 
-            filepath = self.depth_filenames[data["image_idx"]]
-            height = int(self._dataparser_outputs.cameras.height[data["image_idx"]])
-            width = int(self._dataparser_outputs.cameras.width[data["image_idx"]])
+        # center = torch.tensor([depth_height / 2, depth_width / 2])
 
-            # Scale depth images to meter units and also by scaling applied to cameras
-            scale_factor = self.depth_unit_scale_factor * self._dataparser_outputs.dataparser_scale
-            depth_image = get_depth_image_from_path(
-                filepath=filepath, height=height, width=width, scale_factor=scale_factor
-            )
-
-            return {"depth_image": depth_image}
-        """
-        # depth_filepath = pipeline.datamanager.surface_detection_dataset.depth_filenames[item['image_idx']]
-
-
+        # # transform yx coordinates of any other directions to the "right" direction
+        # if downward_direction == "right":
+        #     transform = torch.tensor([[1, 0], 
+        #                               [0, 1]])
+        # elif downward_direction == "left":
+        #     transform = torch.tensor([[1, 0], 
+        #                               [0, -1]])
+        #     assert transform_yx(torch.tensor([0, 0]), transform, center).allclose(torch.tensor([0, depth_width-1]))
+        #     print("----------------------------------")
+        # elif downward_direction == "up":
+        #     transform = torch.tensor([[0, 1], 
+        #                               [-1, 0]])
+        #     assert transform_yx(torch.tensor([0, depth_width/2]), transform, center).allclose(torch.tensor([depth_height-1, 0]))
+        # elif downward_direction == "down":
+        #     transform = torch.tensor([[0, -1], 
+        #                               [1, 0]])
+        # else:
+        #     print(f"downward_direction: {downward_direction} is not valid")
+        #     raise NotImplementedError
+        
 
 
 
         # width = max_x - min_x
-        bottom_width = max_y - min_y # Due to polycam the bottom is usually on the right side of the image
-        height = max_x - min_x
+        if downward_direction in ["right", "left"]:
+            height = max_x - min_x
+        else:
+            height = max_y - min_y
         offset_proportion = 0.1
         offset = int(height * offset_proportion)
-        offset_shaped = np.array([[0, offset], 
-                                  [0, offset]])
-        bottom_corners = np.array([[min_y, max_x], 
-                                   [max_y, max_x]])
+
+        if downward_direction == "right":
+            offset_shaped = np.array([[0, offset], 
+                                      [0, offset]])
+            bottom_corners = np.array([[min_y, max_x], 
+                                      [max_y, max_x]])
+            max_num_offset = (x_outbound - max_x) // offset
+        elif downward_direction == "left":
+            offset_shaped = np.array([[0, -offset], 
+                                      [0, -offset]])
+            bottom_corners = np.array([[min_y, min_x], 
+                                      [max_y, min_x]])
+            max_num_offset = min_x // offset
+        elif downward_direction == "up":
+            offset_shaped = np.array([[-offset, 0], 
+                                      [-offset, 0]])
+            bottom_corners = np.array([[min_y, min_x], 
+                                      [min_y, max_x]])
+            max_num_offset = min_y // offset
+        elif downward_direction == "down":
+            offset_shaped = np.array([[offset, 0], 
+                                      [offset, 0]])
+            bottom_corners = np.array([[max_y, min_x], 
+                                      [max_y, max_x]])
+            max_num_offset = (y_outbound - max_y) // offset
+        else:
+            print(f"downward_direction: {downward_direction} is not valid")
+            raise NotImplementedError
         # bottom_corners_init = bottom_corners + offset_shaped
 
-        max_num_offset = (x_outbound - max_x) // offset
-
+        # max_num_offset = (x_outbound - max_x) // offset
         if max_num_offset <= 1:
             continue
 
         # create a new np.array 'corner_candidates' with shape (max_num_offset, 2, 2) where corner_candidates[i] is bottom_corners + i * offset_shaped
-        # avoid using for loop
         corner_candidates = bottom_corners + np.arange(1, max_num_offset).reshape(-1, 1, 1) * offset_shaped
         # corner_candidates.shape: (31, 2, 2)
 
-        image_idx = item['image_idx']
         num_candidates = corner_candidates.shape[0] * 2
         idx_array = np.full((num_candidates, 1), image_idx)
 
         candidate_points = np.hstack((idx_array, corner_candidates.reshape(num_candidates, 2)))
         ray_indices = torch.from_numpy(candidate_points).int() # ray_indices.shape: torch.Size([62, 3])
+
         # create ray bundle from ray indices
         ray_bundle_corner_candidates = pipeline.datamanager.surface_detection_ray_generator(ray_indices)
         depth_candidates, colors_candidates = pipeline.get_surface_detection(pipeline, ray_bundle_corner_candidates)
@@ -287,12 +352,20 @@ def plane_estimation(config: TrainerConfig):
         # randomly sample points in the rectangle area surrounded by corners
         n_every_offset = 5
         # first and final pair of corners_reshaped make up the rectangle area
-        left_pair = corners_reshaped[0]
-        right_pair = corners_reshaped[-1]
-        x_safe_min = left_pair[0][1]
-        x_safe_max = right_pair[1][1]
-        y_safe_min = left_pair[0][0]
-        y_safe_max = right_pair[1][0]
+        starting_pair = corners_reshaped[0]
+        ending_pair = corners_reshaped[-1]
+        corners_safe = torch.cat([starting_pair, ending_pair], dim=0) # (4, 2)
+        x_safe_min = corners_safe[:, 1].min()
+        x_safe_max = corners_safe[:, 1].max()
+        y_safe_min = corners_safe[:, 0].min()
+        y_safe_max = corners_safe[:, 0].max()
+
+        # left_pair = corners_reshaped[0]
+        # right_pair = corners_reshaped[-1]
+        # x_safe_min = left_pair[0][1]
+        # x_safe_max = right_pair[1][1]
+        # y_safe_min = left_pair[0][0]
+        # y_safe_max = right_pair[1][0]
         # bottom_corners = np.array([[min_y, max_x], 
         #                            [max_y, max_x]])
 
@@ -313,11 +386,10 @@ def plane_estimation(config: TrainerConfig):
         ray_bundle_random = pipeline.datamanager.surface_detection_ray_generator(random_points)
         depth_random, colors_random = pipeline.get_surface_detection(pipeline, ray_bundle_random)
 
-        all_xy = torch.cat([corners, random_points_yx], dim=0) # (n_safe + n_random, 2)
+        all_yx = torch.cat([corners, random_points_yx], dim=0) # (n_safe + n_random, 2)
         all_depth = torch.cat([depth_corners, depth_random.squeeze()], dim=0) # (n_safe + n_random,)
         all_colors = torch.cat([colors_corners, colors_random], dim=0) # (n_safe + n_random, 3)
 
-        camera = pipeline.datamanager.surface_detection_camera[image_idx]
         fx = camera.fx.to(depth_corners.device)
         fy = camera.fy.to(depth_corners.device)
         cx = camera.cx.to(depth_corners.device)
@@ -331,8 +403,8 @@ def plane_estimation(config: TrainerConfig):
 
         # x = corners[:, 1]
         # y = corners[:, 0]
-        x = all_xy[:, 1]
-        y = all_xy[:, 0]
+        x = all_yx[:, 1]
+        y = all_yx[:, 0]
 
         # xyz in camera coordinates
         # X = (x - cx) * depth_corners / fx
@@ -506,7 +578,7 @@ def plane_estimation(config: TrainerConfig):
 
     # filter out points with mahalanobis similarity less than some threshold
     # similarity_threshold = 0.6
-    similarity_threshold = 0.6
+    similarity_threshold = 0.5
     n_points = world_xyz_np.shape[0]
     world_xyz_np = world_xyz_np[mahalanobis_similarity.flatten() > similarity_threshold]
     mahalanobis_similarity = mahalanobis_similarity[mahalanobis_similarity.flatten() > similarity_threshold]
@@ -547,6 +619,10 @@ def plane_estimation(config: TrainerConfig):
                          [max_point[0], min_point[1], max_point[2]],
                          [max_point[0], max_point[1], min_point[2]],
                          [max_point[0], max_point[1], max_point[2]]])
+    
+    # read object_obb from datamanager as numpy on cpu
+    object_obb = pipeline.datamanager.object_obb
+    obb_vertices = object_obb.get_corners().cpu().numpy()
     
     # Create a 3D plot
     fig = plt.figure()
@@ -590,12 +666,23 @@ def plane_estimation(config: TrainerConfig):
             ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], 
                     [starting_vertex[2], ending_vertex[2]], color="red")    
 
+    # Plot the edges of the obb
+    for direction, edge_indices in edges.items():
+        for i, j in edge_indices:
+            # Get the starting and ending vertices for this edge
+            starting_vertex = obb_vertices[i]
+            ending_vertex = obb_vertices[j]
+            # Plot the edge
+            ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], 
+                    [starting_vertex[2], ending_vertex[2]], color="red")    
+
     # plt.show()
     
     # The equation of the plane is `ax + by + cz + d = 0`
     CONSOLE.print(f"The points used for the plane equation are: {world_xyz_np}")
     CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
-    CONSOLE.print(f"The object bbox vertices are {vertices}")
+    CONSOLE.print(f"The object aabb vertices are {vertices}")
+    CONSOLE.print(f"The object obb vertices are {obb_vertices}")
 
     # config.set_timestamp()
     plot_dir = os.path.join(str(load_dir).replace('nerfstudio_models', ''), 'wandb/plots')
@@ -629,10 +716,22 @@ def plane_estimation(config: TrainerConfig):
     np.save(intersections_path, np.array(bbox_intersections))
     print(f"The aabb intersections are: {bbox_intersections}")
     print(f"Saved the aabb intersections to {intersections_path}")
+
+    obb_intersections = derive_nsa(a, b, c, d, obb_vertices)
+    # save the intersections as npy file
+    obb_intersections_path = os.path.join(plot_dir, f"obb_intersections.npy")
+    np.save(obb_intersections_path, np.array(obb_intersections))
+    print(f"The obb intersections are: {obb_intersections}")
+    print(f"Saved the obb intersections to {obb_intersections_path}")
+
     # plot the intersections in the 3D plot
     for intersection in bbox_intersections:
         ax.scatter(*intersection, color="green")
-    print(f"bbox_intersections: {bbox_intersections}")
+
+    # plot the obb intersections in the 3D plot
+    for intersection in obb_intersections:
+        ax.scatter(*intersection, color="blue", marker="x")
+
     # save the 3D plot locally
     plot_path = os.path.join(plot_dir, f"nsa_plot.png")
     plt.savefig(plot_path)
