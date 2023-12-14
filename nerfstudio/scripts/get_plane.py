@@ -192,6 +192,32 @@ def plane_estimation(config: TrainerConfig):
         min_y = np.min(y)
         max_x = np.max(x)
         min_x = np.min(x)
+
+        # decide which direction (out of "down", "up", "left", "right") to search for the bottom pixel
+        # read depth image
+        """
+        def get_metadata(self, data: Dict) -> Dict:
+            if self.depth_filenames is None:
+                return {"depth_image": self.depths[data["image_idx"]]}
+
+            filepath = self.depth_filenames[data["image_idx"]]
+            height = int(self._dataparser_outputs.cameras.height[data["image_idx"]])
+            width = int(self._dataparser_outputs.cameras.width[data["image_idx"]])
+
+            # Scale depth images to meter units and also by scaling applied to cameras
+            scale_factor = self.depth_unit_scale_factor * self._dataparser_outputs.dataparser_scale
+            depth_image = get_depth_image_from_path(
+                filepath=filepath, height=height, width=width, scale_factor=scale_factor
+            )
+
+            return {"depth_image": depth_image}
+        """
+        # depth_filepath = pipeline.datamanager.surface_detection_dataset.depth_filenames[item['image_idx']]
+
+
+
+
+
         # width = max_x - min_x
         bottom_width = max_y - min_y # Due to polycam the bottom is usually on the right side of the image
         height = max_x - min_x
@@ -647,6 +673,24 @@ def derive_nsa(a, b, c, d, vertices):
                 intersection = starting_vertex + t * directional_vector
                 # Append the intersection to the list of intersections
                 intersections.append(intersection)
+
+    # If no intersections were found, project the bbox along the z axis (strong assumption that the z axis is the vertical axis)
+    if len(intersections) == 0:
+        print("No intersection found, will project along the z axis")
+        direction = "z"
+        edge_indices = edges[direction]
+        directional_vector = vertices[1] - vertices[0]
+        for i, j in edge_indices:
+            # Get the starting vertex and directional vector for this edge
+            starting_vertex = vertices[i]
+
+            # Solve for t
+            t = -(a * starting_vertex[0] + b * starting_vertex[1] + c * starting_vertex[2] + d) / (a * directional_vector[0] + b * directional_vector[1] + c * directional_vector[2])
+
+            # Calculate the 3D coordinate of the intersection point
+            intersection = starting_vertex + t * directional_vector
+            # Append the intersection to the list of intersections
+            intersections.append(intersection)
 
     # Return the list of intersections
     return intersections
