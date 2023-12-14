@@ -4,33 +4,40 @@ echo "Preparing the dataset..."
 
 # path of the dataset
 # change to the path where you store the polycam raw data
-path_dataset='G:\Mixed_Reality\mr_dataset\datasets'
-path_segmentation='G:\Mixed_Reality\mr_dataset\MiVOS_segmentation'
+# path_dataset='polycam_raw/fire_extinguisher'
+# path_segmentation='G:\Mixed_Reality\mr_dataset\MiVOS_segmentation'
 
 
-cd $path_dataset 
-files=$(ls)
+# cd $path_dataset 
+# files=$(ls)
 
-for file in $files
-do
 
-    file_name=$(echo $file | cut -f 1 -d '.')
-    # skip the file if it is a directory
-    if [ -d $file_name ]
-    then
-        continue
-    fi
-    echo "Processing "$file_name
-    mkdir $file_name
-    output_dir=$path_dataset/$file_name
-    # process the data under the path_data/dataset_name
-    ns-process-data polycam --data $file --output-dir $output_dir --use_depth
-    # delete the .zip file
-    rm $file
+# for file in $files
+# do
+
+#     file_name=$(echo $file | cut -f 1 -d '.')
+#     # skip the file if it is a directory
+#     if [ -d $file_name ]
+#     then
+#         continue
+#     fi
+#     echo "Processing "$file_name
+#     mkdir $file_name
+#     output_dir=$path_dataset/$file_name
+#     # process the data under the path_data/dataset_name
+#     ns-process-data polycam --data $file --output-dir $output_dir --use_depth
+#     # delete the .zip file
+#     rm $file
     
-    # execute the the path_segmentation/interactive_gui.py
+#     # execute the the path_segmentation/interactive_gui.py
     
-done
+# done
+
+path_dataset='polycam_raw'
+polycam_dataset='polycam_raw/fire_extinguisher'
+path_segmentation='MiVOS_segmentation'
+output_dir='data/nerfstudio/fire_extinguisher'
+ns-process-data polycam --data $polycam_dataset --output-dir $output_dir --use_depth
 
 echo "Converted All Datasets to NerfStudio Format!"
 
@@ -38,8 +45,9 @@ echo "Preparing Segmentation Masks..."
 
 
 # List all directories in the path_dataset
-dirs=( $(find "$path_dataset"/* -maxdepth 0 -type d) )
-
+# dirs=( $(find "$path_dataset"/* -maxdepth 0 -type d) )
+target_dir='data/nerfstudio'
+dirs=( $(find "$target_dir"/* -maxdepth 0 -type d) )
 # Print all directories
 echo "Datasets:"
 for (( i=0; i<${#dirs[@]}; i++ )); do

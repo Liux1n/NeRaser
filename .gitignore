@@ -202,3 +202,7 @@ occupancy.ipynb
 
 datasets/
 MiVOS_segmentation/saves/
+
+# added for demo machine
+polycam_raw/
+render/

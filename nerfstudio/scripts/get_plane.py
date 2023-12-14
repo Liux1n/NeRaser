@@ -204,10 +204,17 @@ def plane_estimation(config: TrainerConfig):
         # bottom_corners_init = bottom_corners + offset_shaped
 
         max_num_offset = (x_outbound - max_x) // offset
+
+        print(f"max_num_offset: {max_num_offset}")
+
+        if max_num_offset <= 1:
+            continue
+
         # create a new np.array 'corner_candidates' with shape (max_num_offset, 2, 2) where corner_candidates[i] is bottom_corners + i * offset_shaped
         # avoid using for loop
         corner_candidates = bottom_corners + np.arange(1, max_num_offset).reshape(-1, 1, 1) * offset_shaped
         # corner_candidates.shape: (31, 2, 2)
+        print(f"corner_candidates.shape: {corner_candidates.shape}")
 
         image_idx = item['image_idx']
         num_candidates = corner_candidates.shape[0] * 2
@@ -225,6 +232,7 @@ def plane_estimation(config: TrainerConfig):
         colors_candidates_reshaped = colors_candidates.reshape(corner_candidates.shape[0], 2, 3) # (31, 2, 3)
         
         depth_diff = depth_candidates_reshaped[1:] - depth_candidates_reshaped[:-1] # (30, 2, 1)
+        print(f"depth_diff.shape: {depth_diff.shape}")
         # print(f"depth_diff < 0: {depth_diff < 0}") # looks reliable
         # print(f"depth_diff[1:] > depth_diff[:-1]: {depth_diff[1:] > depth_diff[:-1]}") # turned out to contain many Falses even at the start
 
@@ -233,12 +241,17 @@ def plane_estimation(config: TrainerConfig):
         depth_criteria = depth_diff < 0
         # depth_criteria.shape: torch.Size([30, 2, 1])
 
-        depth_criteria_every_offset = depth_criteria.all(dim=1).squeeze()
+        depth_criteria_every_offset = depth_criteria.all(dim=1).squeeze(-1)
+        print(f"depth_criteria_every_offset.shape: {depth_criteria_every_offset.shape}")
         # a new boolean tensor 'depth_safe' with same shape as depth_criteria_every_offset, and depth_safe[i] is True if depth_criteria_every_offset[i] is True when depth_criteria_every_offset[:i+1] are all True
-        false_indices = torch.where(depth_criteria_every_offset == False)[0]
+        depth_criteria_every_offset_finally_false = torch.cat([depth_criteria_every_offset, torch.tensor([False], device=depth_criteria_every_offset.device)], dim=0)
+        # false_indices = torch.where(depth_criteria_every_offset == False)[0]
+        false_indices = torch.where(depth_criteria_every_offset_finally_false == False)[0] # make sure there is always a terminating False
+        print(f"depth_criteria_every_offset_finally_false: {depth_criteria_every_offset_finally_false}")
+        # print(f"depth_criteria_every_offset: {depth_criteria_every_offset}")
         if len(false_indices) == 0 or false_indices[0] == 0:
             continue
-        first_false = torch.where(depth_criteria_every_offset == False)[0][0]
+        first_false = false_indices[0]
         depth_safe = torch.zeros_like(depth_criteria_every_offset)
         depth_safe[:first_false] = True # depth_safe.shape: torch.Size([30])
         # concat a True at the start of depth_safe
@@ -317,6 +330,8 @@ def plane_estimation(config: TrainerConfig):
         world_xyz.append(world_coordinates.cpu().numpy())
         # colors.append(colors_corners.cpu().numpy())
         colors.append(all_colors.cpu().numpy())
+
+        print(f"world_coordinates.shape: {world_coordinates.shape}")
 
     world_xyz_np = np.concatenate(world_xyz, axis=0)
     colors_np = np.concatenate(colors, axis=0)
