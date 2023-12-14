@@ -199,3 +199,6 @@ interpolated_depth_average.png
 # add by liuxin
 occupancy.ipynb
 *.npy
+
+datasets/
+MiVOS_segmentation/saves/
