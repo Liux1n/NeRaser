@@ -626,8 +626,8 @@ def plane_estimation(config: TrainerConfig):
                          [max_point[0], max_point[1], max_point[2]]])
     
     # read object_obb from datamanager as numpy on cpu
-    object_obb = pipeline.datamanager.object_obb
-    obb_vertices = object_obb.get_corners().cpu().numpy()
+    # object_obb = pipeline.datamanager.object_obb
+    # obb_vertices = object_obb.get_corners().cpu().numpy()
     
     # Create a 3D plot
     fig = plt.figure()
@@ -671,15 +671,15 @@ def plane_estimation(config: TrainerConfig):
             ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], 
                     [starting_vertex[2], ending_vertex[2]], color="red")    
 
-    # Plot the edges of the obb
-    for direction, edge_indices in edges.items():
-        for i, j in edge_indices:
-            # Get the starting and ending vertices for this edge
-            starting_vertex = obb_vertices[i]
-            ending_vertex = obb_vertices[j]
-            # Plot the edge
-            ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], 
-                    [starting_vertex[2], ending_vertex[2]], color="red")    
+    # # Plot the edges of the obb
+    # for direction, edge_indices in edges.items():
+    #     for i, j in edge_indices:
+    #         # Get the starting and ending vertices for this edge
+    #         starting_vertex = obb_vertices[i]
+    #         ending_vertex = obb_vertices[j]
+    #         # Plot the edge
+    #         ax.plot([starting_vertex[0], ending_vertex[0]], [starting_vertex[1], ending_vertex[1]], 
+    #                 [starting_vertex[2], ending_vertex[2]], color="red")    
 
     # plt.show()
     
@@ -687,7 +687,7 @@ def plane_estimation(config: TrainerConfig):
     CONSOLE.print(f"The points used for the plane equation are: {world_xyz_np}")
     CONSOLE.print(f"The equation of the plane is {a}x + {b}y + {c}z + {d} = 0")
     CONSOLE.print(f"The object aabb vertices are {vertices}")
-    CONSOLE.print(f"The object obb vertices are {obb_vertices}")
+    # CONSOLE.print(f"The object obb vertices are {obb_vertices}")
 
     # config.set_timestamp()
     plot_dir = os.path.join(str(load_dir).replace('nerfstudio_models', ''), 'wandb/plots')
@@ -722,20 +722,20 @@ def plane_estimation(config: TrainerConfig):
     print(f"The aabb intersections are: {bbox_intersections}")
     print(f"Saved the aabb intersections to {intersections_path}")
 
-    obb_intersections = derive_nsa(a, b, c, d, obb_vertices)
-    # save the intersections as npy file
-    obb_intersections_path = os.path.join(plot_dir, f"obb_intersections.npy")
-    np.save(obb_intersections_path, np.array(obb_intersections))
-    print(f"The obb intersections are: {obb_intersections}")
-    print(f"Saved the obb intersections to {obb_intersections_path}")
+    # obb_intersections = derive_nsa(a, b, c, d, obb_vertices)
+    # # save the intersections as npy file
+    # obb_intersections_path = os.path.join(plot_dir, f"obb_intersections.npy")
+    # np.save(obb_intersections_path, np.array(obb_intersections))
+    # print(f"The obb intersections are: {obb_intersections}")
+    # print(f"Saved the obb intersections to {obb_intersections_path}")
 
     # plot the intersections in the 3D plot
     for intersection in bbox_intersections:
         ax.scatter(*intersection, color="green")
 
-    # plot the obb intersections in the 3D plot
-    for intersection in obb_intersections:
-        ax.scatter(*intersection, color="blue", marker="x")
+    # # plot the obb intersections in the 3D plot
+    # for intersection in obb_intersections:
+    #     ax.scatter(*intersection, color="blue", marker="x")
 
     # save the 3D plot locally
     plot_path = os.path.join(plot_dir, f"nsa_plot.png")
