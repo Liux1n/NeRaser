@@ -213,21 +213,25 @@ class NerfactoField(Field):
         if self.load_dir is not None:
             for param in self.mlp_base_mlp.parameters():
                 param.requires_grad = False
+            print("mlp_base_mlp parameters frozen")
 
         # freeze self.direction_encoding if load_dir is not None
         if self.load_dir is not None:
             for param in self.direction_encoding.parameters():
                 param.requires_grad = False
+            print("direction_encoding parameters frozen")
 
         # freeze self.embedding_appearance if load_dir is not None
         # if self.load_dir is not None:
             for param in self.embedding_appearance.parameters():
                 param.requires_grad = False
+            print("embedding_appearance parameters frozen")
 
         # freeze self.mlp_head if load_dir is not None
         # if self.load_dir is not None:
             for param in self.mlp_head.parameters():
                 param.requires_grad = False
+            print("mlp_head parameters frozen")
 
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:

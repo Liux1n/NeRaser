@@ -580,6 +580,7 @@ def plane_estimation(config: TrainerConfig):
     # filter out points with mahalanobis similarity less than some threshold
     # similarity_threshold = 0.6
     similarity_threshold = 0.5
+    # similarity_threshold = 0
     n_points = world_xyz_np.shape[0]
     world_xyz_np = world_xyz_np[mahalanobis_similarity.flatten() > similarity_threshold]
     mahalanobis_similarity = mahalanobis_similarity[mahalanobis_similarity.flatten() > similarity_threshold]
@@ -715,7 +716,7 @@ def plane_estimation(config: TrainerConfig):
     np.save(aabb_path, object_aabb)
     print(f"Saved the aabb to {aabb_path}")
 
-    bbox_intersections = derive_nsa(a, b, c, d, vertices)
+    bbox_intersections = derive_nsa(a, b, c, d, vertices, dilation_scale=1.3)
     # save the intersections as npy file
     intersections_path = os.path.join(plot_dir, f"aabb_intersections.npy")
     np.save(intersections_path, np.array(bbox_intersections))
@@ -744,7 +745,7 @@ def plane_estimation(config: TrainerConfig):
 
 
 
-def derive_nsa(a, b, c, d, vertices):
+def derive_nsa(a, b, c, d, vertices, dilation_scale=1.0):
     # Initialize the list of intersections
     intersections = []
 
@@ -754,6 +755,11 @@ def derive_nsa(a, b, c, d, vertices):
         "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
         "z": [(0, 1), (2, 3), (4, 5), (6, 7)]
     }
+
+    # Dilate the bbox
+    # get the center of the bbox
+    center = np.mean(vertices, axis=0)
+    vertices = (vertices - center) * dilation_scale + center
 
     # Iterate over each edge
     for direction, edge_indices in edges.items():

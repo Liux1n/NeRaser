@@ -145,7 +145,8 @@ class DataProcessor(mp.Process):
         indices = range(len(self.dataset))
         batch_list = []
         results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.config.max_thread_workers) as executor:
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=self.config.max_thread_workers) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
             for idx in indices:
                 res = executor.submit(self.dataset.__getitem__, idx)
                 results.append(res)
@@ -173,10 +174,11 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         config_path: Optional[Path] = None, # added for eval.py
         **kwargs,
     ):
-        if load_dir is not None:
-            self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
-        else:
-            self.dataset_type: Type[TDataset] = DepthDataset
+        # if load_dir is not None:
+        #     self.dataset_type: Type[TDataset] = kwargs.get("_dataset_type", getattr(TDataset, "__default__"))
+        # else:
+        #     self.dataset_type: Type[TDataset] = DepthDataset
+        self.dataset_type: Type[TDataset] = DepthDataset # HARDCODED!!!
         self.config = config
         self.device = device
         self.world_size = world_size
@@ -342,8 +344,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
             if os.path.exists(plane_coeff_path):
                 plane_coefficients = np.load(plane_coeff_path)
                 print(f"plane_coefficients: {plane_coefficients}")
-                self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0)
-                # self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0.05)
+                # self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0)
+                self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0.05)
                 # self.object_obb = self.get_above_plane_obb(plane_coefficients, offset_proportion=0.2)
             else:
                 self.object_obb = None
@@ -571,7 +573,8 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
         """Sets up parallel python data processes for training."""
         assert self.train_dataset is not None
         self.train_pixel_sampler = self._get_pixel_sampler(self.train_dataset, self.config.train_num_rays_per_batch)  # type: ignore
-        self.data_queue = mp.Manager().Queue(maxsize=self.config.queue_size)
+        # self.data_queue = mp.Manager().Queue(maxsize=self.config.queue_size)
+        self.data_queue = mp.Manager().Queue(maxsize=2)
         self.data_procs = [
             DataProcessor(
                 out_queue=self.data_queue,  # type: ignore
@@ -580,14 +583,16 @@ class ParallelDataManager(DataManager, Generic[TDataset]):
                 dataset=self.train_dataset,
                 pixel_sampler=self.train_pixel_sampler,
             )
-            for i in range(self.config.num_processes)
+            # for i in range(self.config.num_processes)
+            for i in range(1)
         ]
         for proc in self.data_procs:
             proc.start()
         print("Started threads")
 
         # Prime the executor with the first batch
-        self.train_executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.config.max_thread_workers)
+        # self.train_executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.config.max_thread_workers)
+        self.train_executor = concurrent.futures.ThreadPoolExecutor(max_workers=None)
         self.train_batch_fut = self.train_executor.submit(self.data_queue.get)
 
     def setup_eval(self):
