@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 from typing import Dict, List, Literal, Optional, Tuple, Type, cast
-
+import wandb
 import torch
 from nerfstudio.configs.experiment_config import ExperimentConfig
 from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManager
@@ -43,6 +43,12 @@ from rich import box, style
 from rich.panel import Panel
 from rich.table import Table
 from torch.cuda.amp.grad_scaler import GradScaler
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 
 TRAIN_INTERATION_OUTPUT = Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
 TORCH_DEVICE = str
@@ -150,6 +156,9 @@ class Trainer:
             world_size=self.world_size,
             local_rank=self.local_rank,
             grad_scaler=self.grad_scaler,
+            load_dir=self.config.load_dir, # added for above table obb derivation
+            # load_dir=Path('outputs/polycam_mate_floor/depth-nerfacto/2023-12-09_000432/nerfstudio_models'), # extremely HARDCODED!!!
+            base_dir=self.base_dir, # added
         )
         self.optimizers = self.setup_optimizers()
 
@@ -283,8 +292,7 @@ class Trainer:
                     writer.put_scalar(
                         name="GPU Memory (MB)", scalar=torch.cuda.max_memory_allocated() / (1024**2), step=step
                     )
-
-                # Do not perform evaluation if there are no validation images
+                
                 if self.pipeline.datamanager.eval_dataset:
                     self.eval_iteration(step)
 

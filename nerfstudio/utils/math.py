@@ -240,6 +240,31 @@ def intersect_aabb(
 
     return t_min, t_max
 
+# # added by cs
+# def intersect_objectbox(
+#     origins: torch.Tensor,
+#     directions: torch.Tensor,
+#     aabb: torch.Tensor,
+#     max_bound: float = 1e10,
+# ) -> Tuple[torch.Tensor, torch.Tensor]:
+
+#     tx_min = (aabb[:3] - origins) / directions
+#     tx_max = (aabb[3:] - origins) / directions
+
+#     t_min = torch.stack((tx_min, tx_max)).amin(dim=0)
+#     t_max = torch.stack((tx_min, tx_max)).amax(dim=0)
+
+#     t_min = t_min.amax(dim=-1)
+#     t_max = t_max.amin(dim=-1)
+
+#     t_min = torch.clamp(t_min, min=0, max=max_bound)
+#     t_max = torch.clamp(t_max, min=0, max=max_bound)
+
+#     cond = t_max <= t_min
+#     t_min = torch.where(cond, 0, t_min)
+#     t_max = torch.where(cond, 0, t_max)
+
+#     return t_min, t_max
 
 def intersect_obb(
     origins: torch.Tensor,
@@ -253,7 +278,7 @@ def intersect_obb(
 
     Args:
         origins: [N,3] tensor of 3d positions
-        directions: [N,3] tensor of normalized directions
+        directions: [N,3] tensor of normalized directionsval_image
         R: [3,3] rotation matrix
         T: [3] translation vector
         S: [3] extents of the bounding box
@@ -275,6 +300,23 @@ def intersect_obb(
     t_min, t_max = intersect_aabb(origins, directions, aabb, max_bound=max_bound, invalid_value=invalid_value)
 
     return t_min, t_max
+
+
+
+def intersect_plane(
+    plane_coefficients,     
+    origins: torch.Tensor,
+    directions: torch.Tensor,
+):
+    a = plane_coefficients[0]
+    b = plane_coefficients[1]
+    c = plane_coefficients[2]
+    d = plane_coefficients[3]
+    normal = torch.Tensor([a,b,c]).to(origins.device)
+    normal = safe_normalize(normal)     #get plane normal
+    point = torch.Tensor([0,0,-d/c]).to(origins.device)
+    t = torch.inner((point - origins),normal)/torch.inner(directions,normal)
+    return t
 
 
 def safe_normalize(

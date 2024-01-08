@@ -39,6 +39,9 @@ from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.base_field import Field, get_normalized_directions
 
+# added to judge whether to freeze some parameters
+from pathlib import Path
+
 
 class NerfactoField(Field):
     """Compound Field that uses TCNN
@@ -96,6 +99,7 @@ class NerfactoField(Field):
         use_average_appearance_embedding: bool = False,
         spatial_distortion: Optional[SpatialDistortion] = None,
         implementation: Literal["tcnn", "torch"] = "tcnn",
+        load_dir: Optional[Path] = None, # added for judging whether to freeze some parameters
     ) -> None:
         super().__init__()
 
@@ -135,6 +139,9 @@ class NerfactoField(Field):
             features_per_level=features_per_level,
             implementation=implementation,
         )
+        # mlp_base_grid: HashEncoding(
+        # (tcnn_encoding): Encoding(n_input_dims=3, n_output_dims=32, seed=1337, dtype=torch.float32, hyperparams={'base_resolution': 16, 'hash': 'CoherentPrime', 'interpolation': 'Linear', 'log2_hashmap_size': 19, 'n_features_per_level': 2, 'n_levels': 16, 'otype': 'Grid', 'per_level_scale': 1.3819128274917603, 'type': 'Hash'})
+        # )
         self.mlp_base_mlp = MLP(
             in_dim=self.mlp_base_grid.get_out_dim(),
             num_layers=num_layers,
@@ -200,6 +207,32 @@ class NerfactoField(Field):
             out_activation=nn.Sigmoid(),
             implementation=implementation,
         )
+
+        self.load_dir = load_dir # added for judging whether to freeze some parameters
+        # freeze self.mlp_base_mlp if load_dir is not None
+        if self.load_dir is not None:
+            for param in self.mlp_base_mlp.parameters():
+                param.requires_grad = False
+            print("mlp_base_mlp parameters frozen")
+
+        # freeze self.direction_encoding if load_dir is not None
+        if self.load_dir is not None:
+            for param in self.direction_encoding.parameters():
+                param.requires_grad = False
+            print("direction_encoding parameters frozen")
+
+        # freeze self.embedding_appearance if load_dir is not None
+        # if self.load_dir is not None:
+            for param in self.embedding_appearance.parameters():
+                param.requires_grad = False
+            print("embedding_appearance parameters frozen")
+
+        # freeze self.mlp_head if load_dir is not None
+        # if self.load_dir is not None:
+            for param in self.mlp_head.parameters():
+                param.requires_grad = False
+            print("mlp_head parameters frozen")
+
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         """Computes and returns the densities."""

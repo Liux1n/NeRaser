@@ -88,6 +88,38 @@ class OrientedBox:
     S: Float[Tensor, "3"]
     """S: scale vector."""
 
+    # get the 8 corners of the box
+    # in the order of     
+    # edges = {
+    #     "x": [(0, 4), (1, 5), (2, 6), (3, 7)],
+    #     "y": [(0, 2), (1, 3), (4, 6), (5, 7)],
+    #     "z": [(0, 1), (2, 3), (4, 5), (6, 7)]
+    # }
+    def get_corners(self):
+        """Returns the 8 corners of the box."""
+        corners = torch.tensor(
+            [
+                [-1.0, -1.0, -1.0],
+                [-1.0, -1.0, 1.0],
+                [-1.0, 1.0, -1.0],
+                [-1.0, 1.0, 1.0],
+                [1.0, -1.0, -1.0],
+                [1.0, -1.0, 1.0],
+                [1.0, 1.0, -1.0],
+                [1.0, 1.0, 1.0],
+            ],
+            dtype=self.R.dtype,
+            device=self.R.device,
+        )
+        corners = corners * self.S / 2.0
+        corners_homogeneous = torch.cat((corners, torch.ones_like(corners[..., :1])), dim=-1)
+        # corners = torch.matmul(self.R, corners.T).T + self.T
+        H = torch.eye(4, device=self.R.device, dtype=self.R.dtype)
+        H[:3, :3] = self.R
+        H[:3, 3] = self.T
+        corners = torch.matmul(H, corners_homogeneous.T).T[..., :3]
+        return corners
+
     def within(self, pts: Float[Tensor, "n 3"]):
         """Returns a boolean mask indicating whether each point is within the box."""
         R, T, S = self.R, self.T, self.S.to(pts)

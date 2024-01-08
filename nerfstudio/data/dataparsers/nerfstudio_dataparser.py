@@ -60,6 +60,7 @@ class NerfstudioDataParserConfig(DataParserConfig):
     auto_scale_poses: bool = True
     """Whether to automatically scale the poses to fit in +/- 1 bounding box."""
     eval_mode: Literal["fraction", "filename", "interval", "all"] = "fraction"
+    # eval_mode: Literal["fraction", "filename", "interval", "all"] = "filename" # HARDCODED TODO: parametrize it
     """
     The method to use for splitting the dataset into train and eval. 
     Fraction splits based on a percentage for train and the remaining for eval.
@@ -231,10 +232,19 @@ class Nerfstudio(DataParser):
             orientation_method = self.config.orientation_method
 
         poses = torch.from_numpy(np.array(poses).astype(np.float32))
-        poses, transform_matrix = camera_utils.auto_orient_and_center_poses(
+
+        # # hardcoded for 2nd round training for mate_floor dataset
+        # # TODO: fix this
+        # history_matrix = torch.tensor([[1.0000, 0.0000, 0.0000, 0.3408],
+        #                                  [0.0000, 1.0000, 0.0000, 0.0175],
+        #                                  [0.0000, 0.0000, 1.0000, 0.7682]])
+        history_matrix = None
+        
+        poses, transform_matrix = camera_utils.auto_orient_and_center_poses( # TODO: add history option to fix the pose issue
             poses,
             method=orientation_method,
             center_method=self.config.center_method,
+            history_matrix=history_matrix,
         )
 
         # Scale poses
@@ -309,6 +319,16 @@ class Nerfstudio(DataParser):
             applied_scale = float(meta["applied_scale"])
             scale_factor *= applied_scale
 
+        print("scale_factor", scale_factor)
+        print("transform_matrix", transform_matrix)
+
+        # # hardcoded for 2nd round training for mate_floor dataset
+        # # TODO: fix this
+        # scale_factor = 1.0
+        # transform_matrix = torch.tensor([[1.0000, 0.0000, 0.0000, 0.3408],
+        #                                  [0.0000, 1.0000, 0.0000, 0.0175],
+        #                                  [0.0000, 0.0000, 1.0000, 0.7682]])
+        
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,
             cameras=cameras,

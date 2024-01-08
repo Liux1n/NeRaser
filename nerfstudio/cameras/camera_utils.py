@@ -518,6 +518,7 @@ def auto_orient_and_center_poses(
     poses: Float[Tensor, "*num_poses 4 4"],
     method: Literal["pca", "up", "vertical", "none"] = "up",
     center_method: Literal["poses", "focus", "none"] = "poses",
+    history_matrix: Optional[Float[Tensor, "3 4"]] = None, # added to force transform matrix
 ) -> Tuple[Float[Tensor, "*num_poses 3 4"], Float[Tensor, "3 4"]]:
     """Orients and centers the poses.
 
@@ -570,7 +571,11 @@ def auto_orient_and_center_poses(
         if torch.linalg.det(eigvec) < 0:
             eigvec[:, 2] = -eigvec[:, 2]
 
-        transform = torch.cat([eigvec, eigvec @ -translation[..., None]], dim=-1)
+        # transform = torch.cat([eigvec, eigvec @ -translation[..., None]], dim=-1)
+        if history_matrix is None:
+            transform = torch.cat([eigvec, eigvec @ -translation[..., None]], dim=-1)
+        else:
+            transform = history_matrix
         oriented_poses = transform @ poses
 
         if oriented_poses.mean(dim=0)[2, 1] < 0:
@@ -612,12 +617,22 @@ def auto_orient_and_center_poses(
                 up = up / torch.linalg.norm(up)
 
         rotation = rotation_matrix(up, torch.Tensor([0, 0, 1]))
-        transform = torch.cat([rotation, rotation @ -translation[..., None]], dim=-1)
+        if history_matrix is None:
+            transform = torch.cat([rotation, rotation @ -translation[..., None]], dim=-1)
+        else:
+            transform = history_matrix
+        # transform = torch.cat([rotation, rotation @ -translation[..., None]], dim=-1)
         oriented_poses = transform @ poses
     elif method == "none":
-        transform = torch.eye(4)
-        transform[:3, 3] = -translation
-        transform = transform[:3, :]
+        if history_matrix is None:
+            transform = torch.eye(4)
+            transform[:3, 3] = -translation
+            transform = transform[:3, :]
+        else:    
+            transform = history_matrix
+        # transform = torch.eye(4)
+        # transform[:3, 3] = -translation
+        # transform = transform[:3, :]
         oriented_poses = transform @ poses
     else:
         raise ValueError(f"Unknown value for method: {method}")

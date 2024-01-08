@@ -50,6 +50,9 @@ from nerfstudio.model_components.shaders import NormalsShader
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import colormaps
 
+# added for judging whether to freeze some parameters
+from typing import Optional
+from pathlib import Path
 
 @dataclass
 class NerfactoModelConfig(ModelConfig):
@@ -140,6 +143,13 @@ class NerfactoModel(Model):
 
     config: NerfactoModelConfig
 
+    def __init__(self, 
+                 config: NerfactoModelConfig, 
+                 load_dir: Optional[Path] = None, 
+                 **kwargs) -> None:
+        self.load_dir = load_dir
+        super().__init__(config=config, **kwargs)
+
     def populate_modules(self):
         """Set the fields and modules."""
         super().populate_modules()
@@ -166,6 +176,7 @@ class NerfactoModel(Model):
             use_average_appearance_embedding=self.config.use_average_appearance_embedding,
             appearance_embedding_dim=self.config.appearance_embed_dim,
             implementation=self.config.implementation,
+            load_dir=self.load_dir, # added for judging whether to freeze some parameters
         )
 
         self.camera_optimizer: CameraOptimizer = self.config.camera_optimizer.setup(
@@ -393,10 +404,16 @@ class NerfactoModel(Model):
             outputs["depth"],
             accumulation=outputs["accumulation"],
         )
+        depth_raw = outputs["depth"]
+
+        # depth.shape: torch.Size([738, 994, 3])
+        # depth_raw.shape: torch.Size([738, 994, 1])
 
         combined_rgb = torch.cat([gt_rgb, predicted_rgb], dim=1)
         combined_acc = torch.cat([acc], dim=1)
         combined_depth = torch.cat([depth], dim=1)
+
+        combined_depth_raw = torch.cat([depth_raw], dim=1)
 
         # Switch images from [H, W, C] to [1, C, H, W] for metrics computations
         gt_rgb = torch.moveaxis(gt_rgb, -1, 0)[None, ...]
@@ -410,7 +427,8 @@ class NerfactoModel(Model):
         metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
         metrics_dict["lpips"] = float(lpips)
 
-        images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth}
+        # images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth}
+        images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth, "depth_raw": combined_depth_raw}
 
         for i in range(self.config.num_proposal_iterations):
             key = f"prop_depth_{i}"

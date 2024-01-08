@@ -58,11 +58,12 @@ def get_image_mask_tensor_from_path(filepath: Path, scale_factor: float = 1.0) -
                                                 (dilatation_size, dilatation_size))
 
     src = np.array(pil_mask)
+    # TODO: switch to dilation for the second round of training
     dilatation_dst = cv2.erode(src, element) # erode white = dilate black
       
     mask_tensor = torch.from_numpy(dilatation_dst).unsqueeze(-1).bool()
-    
-    #mask_tensor = torch.from_numpy(np.array(pil_mask)).unsqueeze(-1).bool()
+
+    mask_tensor = torch.from_numpy(np.array(pil_mask)).unsqueeze(-1).bool()
     if len(mask_tensor.shape) != 3:
         raise ValueError("The mask image should have 1 channel")
     return mask_tensor

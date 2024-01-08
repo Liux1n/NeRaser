@@ -34,6 +34,9 @@ from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes
 from nerfstudio.model_components.scene_colliders import NearFarCollider
 
+# added for judging whether to freeze some parameters
+from pathlib import Path
+
 
 # Model related configs
 @dataclass
@@ -71,6 +74,7 @@ class Model(nn.Module):
         config: ModelConfig,
         scene_box: SceneBox,
         num_train_data: int,
+        load_dir: Optional[Path] = None,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -85,6 +89,9 @@ class Model(nn.Module):
         self.callbacks = None
         # to keep track of which device the nn.Module is on
         self.device_indicator_param = nn.Parameter(torch.empty(0))
+
+        # added for judging whether to freeze some parameters
+        self.load_dir = load_dir
 
     @property
     def device(self):

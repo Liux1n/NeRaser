@@ -31,7 +31,11 @@ from nerfstudio.data.datamanagers.base_datamanager import (
     VanillaDataManager,
     VanillaDataManagerConfig,
 )
-from nerfstudio.data.datamanagers.parallel_datamanager import ParallelDataManagerConfig
+# from nerfstudio.data.datamanagers.parallel_datamanager import ParallelDataManagerConfig
+from nerfstudio.data.datamanagers.parallel_datamanager import (
+    ParallelDataManager,
+    ParallelDataManagerConfig, 
+)
 from nerfstudio.data.datamanagers.random_cameras_datamanager import (
     RandomCamerasDataManagerConfig,
 )
@@ -221,9 +225,11 @@ method_configs["depth-nerfacto"] = TrainerConfig(
     max_num_iterations=30000,
     mixed_precision=True,
     pipeline=VanillaPipelineConfig(
-        datamanager=VanillaDataManagerConfig(
-            _target=VanillaDataManager[DepthDataset],
-            pixel_sampler=PairPixelSamplerConfig(),
+        # datamanager=VanillaDataManagerConfig(
+        #     _target=VanillaDataManager[DepthDataset],
+        #     pixel_sampler=PairPixelSamplerConfig(),
+        datamanager=ParallelDataManagerConfig(
+            _target=ParallelDataManager[DepthDataset],
             dataparser=NerfstudioDataParserConfig(),
             train_num_rays_per_batch=4096,
             eval_num_rays_per_batch=4096,
@@ -247,7 +253,8 @@ method_configs["depth-nerfacto"] = TrainerConfig(
             "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-4, max_steps=5000),
         },
     },
-    viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
+    # viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
+    viewer=ViewerConfig(num_rays_per_chunk=1 << 14),
     vis="viewer",
 )
 

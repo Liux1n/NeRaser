@@ -84,6 +84,7 @@ def _render_trajectory_video(
     depth_near_plane: Optional[float] = None,
     depth_far_plane: Optional[float] = None,
     colormap_options: colormaps.ColormapOptions = colormaps.ColormapOptions(),
+    skip_bbox: bool = False,
 ) -> None:
     """Helper function to create a video of the spiral trajectory.
 
@@ -99,6 +100,7 @@ def _render_trajectory_video(
         depth_near_plane: Closest depth to consider when using the colormap for depth. If None, use min value.
         depth_far_plane: Furthest depth to consider when using the colormap for depth. If None, use max value.
         colormap_options: Options for colormap.
+        skip_bbox: Whether to skip bounding box.
     """
     CONSOLE.print("[bold green]Creating trajectory " + output_format)
     cameras.rescale_output_resolution(rendered_resolution_scaling_factor)
@@ -137,7 +139,13 @@ def _render_trajectory_video(
                 obb_box = None
                 if crop_data is not None:
                     obb_box = crop_data.obb
-                camera_ray_bundle = cameras.generate_rays(camera_indices=camera_idx, obb_box=obb_box)
+                if skip_bbox:
+                    object_obb = pipeline.datamanager.object_obb
+                    CONSOLE.print("loaded object obb for rendering...")
+                else:
+                    object_obb = None
+                    CONSOLE.print("Not skipping bbox...")
+                camera_ray_bundle = cameras.generate_rays(camera_indices=camera_idx, obb_box=obb_box, object_obb=object_obb)
 
                 if crop_data is not None:
                     with renderers.background_color_override_context(
@@ -512,6 +520,8 @@ class RenderInterpolated(BaseRender):
     """Frame rate of the output video."""
     output_format: Literal["images", "video"] = "video"
     """How to save output data."""
+    skip_bbox: bool = False
+    """Whether to skip bounding box."""
 
     def main(self) -> None:
         """Main function."""
@@ -549,6 +559,7 @@ class RenderInterpolated(BaseRender):
             depth_near_plane=self.depth_near_plane,
             depth_far_plane=self.depth_far_plane,
             colormap_options=self.colormap_options,
+            skip_bbox=self.skip_bbox,
         )
 
 

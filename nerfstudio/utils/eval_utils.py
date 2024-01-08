@@ -102,7 +102,7 @@ def eval_setup(
 
     # setup pipeline (which includes the DataManager)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    pipeline = config.pipeline.setup(device=device, test_mode=test_mode)
+    pipeline = config.pipeline.setup(device=device, test_mode=test_mode, config_path=config_path)
     assert isinstance(pipeline, Pipeline)
     pipeline.eval()
 

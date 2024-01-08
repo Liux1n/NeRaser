@@ -27,6 +27,10 @@ import torch
 from rich.progress import track
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
+# added for object_aabb
+from jaxtyping import Float
+from torch import Tensor
+import numpy as np
 
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.cameras.rays import RayBundle
@@ -35,6 +39,8 @@ from nerfstudio.data.utils.nerfstudio_collate import nerfstudio_collate
 from nerfstudio.utils.misc import get_dict_to_torch
 from nerfstudio.utils.rich_utils import CONSOLE
 
+# new
+from nerfstudio.data.scene_box import OrientedBox
 
 class CacheDataloader(DataLoader):
     """Collated image dataset that implements caching of default-pytorch-collatable data.
@@ -158,12 +164,19 @@ class EvalDataloader(DataLoader):
         self,
         input_dataset: InputDataset,
         device: Union[torch.device, str] = "cpu",
+        object_aabb: Optional[Float[Tensor, "2 3"]] = None, # new
+        object_obb: Optional[OrientedBox] = None, # new
         **kwargs,
     ):
         self.input_dataset = input_dataset
         self.cameras = input_dataset.cameras.to(device)
         self.device = device
         self.kwargs = kwargs
+
+        # new
+        self.object_aabb = object_aabb
+        self.object_obb = object_obb
+
         super().__init__(dataset=input_dataset)
 
     @abstractmethod
@@ -189,7 +202,7 @@ class EvalDataloader(DataLoader):
         Args:
             image_idx: Camera image index
         """
-        ray_bundle = self.cameras.generate_rays(camera_indices=image_idx, keep_shape=True)
+        ray_bundle = self.cameras.generate_rays(camera_indices=image_idx, keep_shape=True, object_aabb=self.object_aabb, object_obb=self.object_obb) # added object_aabb, object_obb
         batch = self.input_dataset[image_idx]
         batch = get_dict_to_torch(batch, device=self.device, exclude=["image"])
         assert isinstance(batch, dict)
