@@ -47,7 +47,8 @@ pip install --upgrade pip
 ### Dependencies
 
 Install PyTorch with CUDA (this repo has been tested with CUDA 11.7 and CUDA 11.8) and [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn).
-`cuda-toolkit` is required for building `tiny-cuda-nn`.
+`cuda-toolkit` and GCC <= 10 is required for building `tiny-cuda-nn` (GCC version > 10 is not compatible with the version of pybind used in tiny-cuda-nn).
+** Installing tiny-cuda-nn is strongly recommended; not only does it speed up training, but stability is also significantly improved with tiny-cuda-nn installed.** We found that training without tiny-cuda-nn often diverge after a small number of iterations, and suspect that default hyperparameters in nerfstudio are chosen with tiny-cuda-nn in use, leading to instabilities when tiny-cuda-nn is not used.
 
 For CUDA 11.7:
 
