@@ -14,6 +14,16 @@
   <div align="center"></div>
 </p>
 
+<p align="center">
+  <a href="">
+    <img src="./documents/demo.gif" alt="Logo" width="80%">
+  </a>
+</p>
+<p align="center">
+Rendering Result of NeRaser
+</p>
+<p align="center">
+  
 # About NeRaser
 
 NeRaser: A NeRF-based object eraser
