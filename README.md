@@ -85,7 +85,7 @@ python download_model.py # download all required models
 ```
 
 
-## 2. Training your first model!
+## 1. Training your first model!
 
 Modify the directory 'path_dataset' in the NeRaser.sh to where you store the zip file from PolyCam.
 
