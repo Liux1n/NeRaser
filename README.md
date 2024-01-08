@@ -89,6 +89,7 @@ python download_model.py # download all required models
 
 Modify the directory 'path_dataset' in the NeRaser.sh to where you store the zip file from PolyCam.
 
+Run the following script and follow the instructions to generate masks and start training!
 ```bash
 ./NeRaser.sh
 ```
