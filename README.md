@@ -32,7 +32,7 @@ NeRaser: A NeRF-based object eraser
 
 ### Prerequisites
 
-You must have an NVIDIA video card with CUDA installed on the system. This library has been tested with version 11.8 of CUDA. You can find more information about installing CUDA [here](https://docs.nvidia.com/cuda/cuda-quick-start-guide/index.html)
+You must have an NVIDIA video card with CUDA installed on the system. This library has been tested with version 11.7 of CUDA. You can find more information about installing CUDA [here](https://docs.nvidia.com/cuda/cuda-quick-start-guide/index.html)
 
 ### Create environment
 
@@ -58,15 +58,6 @@ conda install -c "nvidia/label/cuda-11.7.1" cuda-toolkit
 pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
 ```
 
-For CUDA 11.8:
-
-```bash
-pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
-
-conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
-pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
-```
-
 See [Dependencies](https://github.com/nerfstudio-project/nerfstudio/blob/main/docs/quickstart/installation.md#dependencies)
 in the Installation documentation for more.
 
@@ -85,9 +76,18 @@ python download_model.py # download all required models
 ```
 
 
+### Installing LaMa
+```bash
+git clone https://github.com/advimman/lama.git lama
+pip install lama/requirements.txt
+mkdir -p lama/model && cd lama/model
+curl -LJO https://huggingface.co/smartywu/big-lama/resolve/main/big-lama.zip | unzip -
+```
+
+
 ## 1. Training your first model!
 
-Modify the directory 'path_dataset' in the NeRaser.sh to where you store the zip file from PolyCam.
+Modify the directory `path_dataset` in the NeRaser.sh to where you store the zip file from PolyCam.
 
 Run the following script and follow the instructions to generate masks and start training!
 ```bash
@@ -101,6 +101,15 @@ If everything works, you should see training progress like the following:
 </p>
 
 Navigating to the link at the end of the terminal will load the webviewer. If you are running on a remote machine, you will need to port forward the websocket port (defaults to 7007).
+
+## 2. Inpainting and post-processing
+
+The previous step would generate NeRF rendering of every viewpoint in the dataset, an estimate of the plane that supports the object, as well as the area on the plane that should be inpainted. Run nsa_processing.ipynb by giving it the `images_render` folder of the dataset created in the previous step, as well as the `plane_coefficients.npy` and `object_occupancy.npy` files, which contain the estimated plane and object occupancy in nerfstudio cooridnates. These two files are located in the `wandb/plots` folder in the output directory of training. The notebook will generate mask for the area to be inpainted, in the `masks_nsa` directory of the dataset directory specified in Neraser.sh. The generated mask can be visually inspected in the notebook for consistency.
+
+Inpainting can be done using the [`predict.py`](https://github.com/advimman/lama/blob/main/bin/predict.py) script in LaMa. The script will inpaint every image in the dataset, but we will only use one of the inpainted image, typically the first frame in the dataset. The notebook can be used again to warp the inpainted area to the rest of the images.
+
+You now have everything you need for the second round of training. Run [`ns-train`](https://github.com/advimman/lama/blob/main/bin/predict.py) by giving it the processed dataset and the `config.yaml` file generated from first round of training, modifying its parameters as needed. 
+
 
 ## 3. Exporting Results
 
