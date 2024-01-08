@@ -10,7 +10,7 @@
     <a href="https://github.com/cs-vision"><strong>Shi Chen*</strong></a>
   </p>
   <p align="center"><strong>(* Equal Contribution)</strong></p>
-  <h3 align="center"><a href="github.com/Liux1n/NeRaser/tree/main/documents/Mixed Reality Poster.pptx.pdf">Poster</a> | <a href="github.com/Liux1n/NeRaser/tree/main/documents/Mixed_Reality_Report.pdf">Report</a></h3>
+  <h3 align="center"><a href="github.com/Liux1n/NeRaser/documents/Mixed Reality Poster.pptx.pdf">Poster</a> | <a href="github.com/Liux1n/NeRaser/tree/main/documents/Mixed_Reality_Report.pdf">Report</a></h3>
   <div align="center"></div>
 </p>
 
