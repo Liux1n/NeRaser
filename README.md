@@ -1,3 +1,19 @@
+<p align="center">
+  <h1 align="center">NeRaser: NeRF-based 3D Object Eraser</h1>
+  <p align="center">
+    <a href="https://github.com/Liux1n"><strong>Liuxin Qing*</strong></a>
+    ·
+    <a href="https://github.com/billyzs"><strong>Shao Zhou*</strong></a>
+    ·
+    <a href="https://github.com/XichongLing"><strong>Xichong Ling*</strong></a>
+    ·
+    <a href="https://github.com/cs-vision"><strong>Shi Chen*</strong></a>
+  </p>
+  <p align="center"><strong>(* Equal Contribution)</strong></p>
+  <h3 align="center"><a href="github.com/Liux1n/NeRaser/tree/main/documents/Mixed Reality Poster.pptx.pdf">Poster</a> | <a href="github.com/Liux1n/NeRaser/tree/main/documents/Mixed_Reality_Report.pdf">Report</a></h3>
+  <div align="center"></div>
+</p>
+
 # About NeRaser
 
 NeRaser: A NeRF-based object eraser
