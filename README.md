@@ -111,7 +111,7 @@ Inpainting can be done using the [`predict.py`](https://github.com/advimman/lama
 
 You now have everything you need for the second round of training. Run [`ns-train`](https://github.com/advimman/lama/blob/main/bin/predict.py) by giving it the processed dataset and the `config.yaml` file generated from first round of training, modifying its parameters as needed. 
 ```bash
-ns-train nerfacto --data path-to-inpainted-data --load-dir path-to-checkpoint
+ns-train nerfacto --data <path-to-inpainted-data> --load-config <config-yaml-file>
 ```
 
 ## 3. Exporting Results
