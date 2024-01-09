@@ -110,7 +110,9 @@ The previous step would generate NeRF rendering of every viewpoint in the datase
 Inpainting can be done using the [`predict.py`](https://github.com/advimman/lama/blob/main/bin/predict.py) script in LaMa. The script will inpaint every image in the dataset, but we will only use one of the inpainted image, typically the first frame in the dataset. The notebook can be used again to warp the inpainted area to the rest of the images.
 
 You now have everything you need for the second round of training. Run [`ns-train`](https://github.com/advimman/lama/blob/main/bin/predict.py) by giving it the processed dataset and the `config.yaml` file generated from first round of training, modifying its parameters as needed. 
-
+```bash
+ns-train nerfacto --data path-to-inpainted-data --load-dir path-to-checkpoint
+```
 
 ## 3. Exporting Results
 
