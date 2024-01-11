@@ -128,6 +128,14 @@ Other video export options are available, learn more by running
 ns-render --help
 ```
 
+## 4. App
+
+A webapp is made to demonstrate the typical workflow of such a tool. The app guides the user through the process of data preparation, mask generation and inspection, and presents the refined NeRF scene without the object. It can be launched with
+
+```bash
+pip install streamlit streamlit_image_coordinates
+streamlit run ./app.py
+```
 
 # Acknowledgement
 This project was undertaken as part of the 2023HS Mixed Reality course at ETH Zurich. We would like to express our sincere appreciation for the valuable guidance and support provided by our supervisor, [Sandro Lombardi](https://github.com/sandrlom).
